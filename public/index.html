@@ -659,10 +659,10 @@
             
             document.getElementById('branchesList').innerHTML = branches.map(branch => {
                 const statusColor = 
+                    branch.status === 'stale' ? 'bg-orange-50 border-orange-300' :
                     branch.status === 'merged' ? 'bg-purple-50 border-purple-300' :
                     branch.status === 'active' ? 'bg-green-50 border-green-300' :
                     branch.status === 'wip' ? 'bg-blue-50 border-blue-300' :
-                    branch.status === 'stale' ? 'bg-yellow-50 border-yellow-300' :
                     'bg-gray-50 border-gray-300';
                 
                 const hasUncommitted = branch.uncommittedChanges > 0;
@@ -676,7 +676,11 @@
                                     <p class="font-medium ${branch.current ? 'text-blue-600' : ''}">
                                         ${branch.current ? '► ' : ''}${branch.name}
                                     </p>
-                                    ${branch.isMerged ? 
+                                    ${branch.isStale ? 
+                                        `<span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-xs font-medium" title="${branch.commitsBehind} commits behind main">
+                                            ⚠️ Stale (${branch.commitsBehind} behind)
+                                        </span>` :
+                                        branch.isMerged ? 
                                         '<span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">Merged</span>' :
                                         hasUncommitted ? 
                                         `<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
@@ -732,7 +736,25 @@
                                         Checkout
                                     </button>
                                 `}
-                                ${branch.isMerged && !branch.current && branch.name !== 'main' ? `
+                                ${branch.isStale && !branch.current ? `
+                                    <div class="flex flex-col gap-1">
+                                        <button onclick="updateStaleBranch('${branch.name}', 'merge')" 
+                                            class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600" 
+                                            title="Merge: Creates a merge commit. Preserves branch history. Safer but adds merge commits to history.">
+                                            Merge Main
+                                        </button>
+                                        <button onclick="updateStaleBranch('${branch.name}', 'rebase')" 
+                                            class="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600" 
+                                            title="Rebase: Replays your commits on top of main. Creates linear history. Cleaner but rewrites commit history.">
+                                            Rebase Main
+                                        </button>
+                                        <button onclick="deleteMergedBranch('${branch.name}')" 
+                                            class="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600"
+                                            title="Delete this stale branch">
+                                            Delete
+                                        </button>
+                                    </div>
+                                ` : branch.isMerged && !branch.current && branch.name !== 'main' ? `
                                     <button onclick="deleteMergedBranch('${branch.name}')" 
                                         class="px-2 py-1 text-xs bg-purple-500 text-white rounded hover:bg-purple-600">
                                         Delete
@@ -780,15 +802,65 @@
                     const res = await fetch(`/api/projects/${activeProject}/branches/${branchName}`, {
                         method: 'DELETE'
                     });
-                    if (res.ok) {
-                        alert(`Branch '${branchName}' deleted successfully`);
-                        refreshBranches();
+                    
+                    // Check if response is JSON
+                    const contentType = res.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/json") !== -1) {
+                        const data = await res.json();
+                        if (res.ok) {
+                            alert(`Branch '${branchName}' deleted successfully`);
+                            refreshBranches();
+                        } else {
+                            alert(`Failed to delete branch: ${data.error || data.message || 'Unknown error'}`);
+                        }
                     } else {
-                        const error = await res.json();
-                        alert(`Failed to delete branch: ${error.message || 'Unknown error'}`);
+                        // Response is not JSON (probably HTML error page)
+                        const text = await res.text();
+                        console.error('Delete branch error response:', text);
+                        alert(`Error: Server returned an unexpected response. Check console for details.`);
                     }
                 } catch (error) {
                     alert(`Error deleting branch: ${error.message}`);
+                }
+            }
+        }
+        
+        async function updateStaleBranch(branchName, method) {
+            const branch = branches.find(b => b.name === branchName);
+            if (!branch) return;
+            
+            const explanation = method === 'merge' 
+                ? `This will merge main into '${branchName}':\n\n` +
+                  `• Creates a merge commit\n` +
+                  `• Preserves your branch's commit history\n` +
+                  `• Safer - won't rewrite history\n` +
+                  `• May create a messier git history\n\n` +
+                  `The branch is ${branch.commitsBehind} commits behind main.`
+                : `This will rebase '${branchName}' onto main:\n\n` +
+                  `• Replays your commits on top of main\n` +
+                  `• Creates a linear, cleaner history\n` +
+                  `• Rewrites commit history (changes commit hashes)\n` +
+                  `• May need force push if already pushed\n\n` +
+                  `The branch is ${branch.commitsBehind} commits behind main.`;
+            
+            if (confirm(explanation + '\n\nProceed?')) {
+                try {
+                    const res = await fetch(`/api/projects/${activeProject}/branches/${branchName}/update`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ method })
+                    });
+                    
+                    if (res.ok) {
+                        const result = await res.json();
+                        alert(`✅ Success!\n\nBranch '${branchName}' has been updated with main using ${method}.\n\n${result.message}`);
+                        refreshBranches();
+                    } else {
+                        const error = await res.json();
+                        alert(`❌ Failed to ${method} branch:\n\n${error.error}\n\n${error.hint || 'You may need to resolve this manually.'}`);
+                    }
+                } catch (error) {
+                    alert(`Error updating branch: ${error.message}`);
                 }
             }
         }

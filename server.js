@@ -143,11 +143,45 @@ app.get('/api/projects/:projectId/worktrees', async (req, res) => {
   }
   
   try {
+    // First, get list of actual git worktrees
+    const { stdout: gitWorktreeList } = await execPromise(`cd ${project.path} && git worktree list`);
+    const registeredWorktrees = gitWorktreeList.split('\n')
+      .filter(line => line.includes('/worktrees/'))
+      .map(line => {
+        const match = line.match(/worktrees\/([^\s]+)/);
+        return match ? match[1] : null;
+      })
+      .filter(Boolean);
+    
     const worktreePath = path.join(project.path, 'worktrees');
-    const worktrees = await fs.readdir(worktreePath);
+    
+    // Check if worktrees directory exists
+    try {
+      await fs.access(worktreePath);
+    } catch {
+      // No worktrees directory
+      return res.json([]);
+    }
+    
+    const directories = await fs.readdir(worktreePath);
     
     const worktreeData = [];
-    for (const wt of worktrees) {
+    for (const wt of directories) {
+      // Skip directories that aren't registered git worktrees
+      // (these are orphaned directories)
+      if (!registeredWorktrees.includes(wt)) {
+        console.log(`Skipping orphaned directory: ${wt} (not a registered git worktree)`);
+        // Optionally, clean it up automatically
+        const orphanPath = path.join(worktreePath, wt);
+        try {
+          await fs.rm(orphanPath, { recursive: true, force: true });
+          console.log(`Cleaned up orphaned directory: ${orphanPath}`);
+        } catch (cleanupError) {
+          console.error(`Failed to clean up orphaned directory ${orphanPath}:`, cleanupError);
+        }
+        continue;
+      }
+      
       const wtPath = path.join(worktreePath, wt);
       const stat = await fs.stat(wtPath);
       if (stat.isDirectory()) {
@@ -274,6 +308,7 @@ app.post('/api/projects/:projectId/worktrees', async (req, res) => {
 // Archive (remove) worktree
 app.delete('/api/projects/:projectId/worktrees/:worktreeName', async (req, res) => {
   const { projectId, worktreeName } = req.params;
+  const { force } = req.query;
   const data = await loadProjects();
   const project = data.projects[projectId];
   
@@ -281,13 +316,46 @@ app.delete('/api/projects/:projectId/worktrees/:worktreeName', async (req, res) 
     return res.status(404).json({ error: 'Project not found' });
   }
   
+  const worktreePath = path.join(project.path, 'worktrees', worktreeName);
+  
   try {
-    // Remove the worktree
-    await execPromise(`cd ${project.path} && git worktree remove worktrees/${worktreeName}`);
+    // First, try to remove via git worktree command
+    const forceFlag = force === 'true' ? '--force' : '';
+    try {
+      await execPromise(`cd ${project.path} && git worktree remove ${forceFlag} worktrees/${worktreeName}`);
+    } catch (gitError) {
+      console.log(`Git worktree remove failed: ${gitError.message}, will try direct cleanup`);
+      
+      // If git worktree remove fails, check if it's because it's not a registered worktree
+      const { stdout: worktreeList } = await execPromise(`cd ${project.path} && git worktree list`);
+      const isRegistered = worktreeList.includes(`worktrees/${worktreeName}`);
+      
+      if (!isRegistered) {
+        console.log(`${worktreeName} is not a registered git worktree, removing directory directly`);
+      } else if (!force) {
+        // It's registered but couldn't be removed (probably dirty), and force wasn't requested
+        throw gitError;
+      }
+    }
+    
+    // Check if directory still exists and remove it if needed
+    if (await fs.access(worktreePath).then(() => true).catch(() => false)) {
+      console.log(`Directory still exists at ${worktreePath}, removing it`);
+      await fs.rm(worktreePath, { recursive: true, force: true });
+    }
     
     res.json({ success: true, message: `Worktree ${worktreeName} archived successfully` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Worktree removal error:', error);
+    // Provide helpful error message
+    if (error.message.includes('is dirty')) {
+      res.status(400).json({ 
+        error: 'Worktree has uncommitted changes. Commit or stash changes first, or use force delete option.',
+        details: error.message 
+      });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
   }
 });
 
@@ -512,6 +580,77 @@ app.delete('/api/sessions/:sessionId', async (req, res) => {
   }
 });
 
+// Update a stale branch with main
+app.post('/api/projects/:projectId/branches/:branchName/update', async (req, res) => {
+  const { projectId, branchName } = req.params;
+  const { method } = req.body; // 'merge' or 'rebase'
+  const data = await loadProjects();
+  const project = data.projects[projectId];
+  
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+  
+  if (branchName === 'main' || branchName === 'master') {
+    return res.status(400).json({ error: 'Cannot update main branch' });
+  }
+  
+  try {
+    // Check if branch exists
+    const { stdout: branches } = await execPromise(
+      `cd ${project.path} && git branch --list ${branchName}`
+    );
+    
+    if (!branches.trim()) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+    
+    // Stash any uncommitted changes
+    await execPromise(`cd ${project.path} && git stash`);
+    
+    // Checkout the branch
+    await execPromise(`cd ${project.path} && git checkout ${branchName}`);
+    
+    // Update based on method
+    let result;
+    if (method === 'rebase') {
+      // Rebase onto main
+      result = await execPromise(`cd ${project.path} && git rebase main`);
+    } else {
+      // Merge main into branch
+      result = await execPromise(`cd ${project.path} && git merge main --no-edit`);
+    }
+    
+    // Pop stash if there were changes
+    try {
+      await execPromise(`cd ${project.path} && git stash pop`);
+    } catch (e) {
+      // No stash to pop
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Branch ${branchName} updated with main using ${method}`,
+      output: result.stdout
+    });
+  } catch (error) {
+    // Try to abort rebase if it failed
+    if (method === 'rebase' && error.message.includes('conflict')) {
+      try {
+        await execPromise(`cd ${project.path} && git rebase --abort`);
+      } catch (e) {
+        // Ignore abort errors
+      }
+    }
+    
+    res.status(500).json({ 
+      error: `Failed to ${method} branch: ${error.message}`,
+      hint: error.message.includes('conflict') ? 
+        'There are conflicts that need manual resolution' : undefined
+    });
+  }
+});
+
 // Delete a branch
 app.delete('/api/projects/:projectId/branches/:branchName', async (req, res) => {
   const { projectId, branchName } = req.params;
@@ -636,6 +775,8 @@ app.get('/api/projects/:projectId/branches', async (req, res) => {
         
         // Check if branch is merged to main
         let isMerged = false;
+        let isBehindMain = false;
+        let commitsBehind = 0;
         try {
           const { stdout: mergedBranches } = await execPromise(
             `cd ${project.path} && git branch --merged main 2>/dev/null`
@@ -643,6 +784,19 @@ app.get('/api/projects/:projectId/branches', async (req, res) => {
           isMerged = mergedBranches.split('\n')
             .map(b => b.trim().replace('* ', ''))
             .includes(branchName);
+          
+          // Check if branch is behind main
+          if (branchName !== 'main') {
+            try {
+              const { stdout: behind } = await execPromise(
+                `cd ${project.path} && git rev-list --count ${branchName}..main 2>/dev/null`
+              );
+              commitsBehind = parseInt(behind.trim()) || 0;
+              isBehindMain = commitsBehind > 0;
+            } catch (e) {
+              // Can't check behind status
+            }
+          }
         } catch (e) {
           // Can't check merge status
         }
@@ -658,7 +812,11 @@ app.get('/api/projects/:projectId/branches', async (req, res) => {
           tracking,
           relatedWorktree,
           isMerged,
-          status: isMerged ? 'merged' :
+          isBehindMain,
+          commitsBehind,
+          isStale: isMerged && isBehindMain && branchName !== 'main',
+          status: (isMerged && isBehindMain && branchName !== 'main') ? 'stale' :
+                  isMerged ? 'merged' :
                   uncommittedChanges > 0 ? 'wip' : 
                   unpushedCommits > 0 ? 'unpushed' : 
                   'clean'

@@ -669,47 +669,61 @@ function renderWorktreesTab() {
                                     ` : ''}
                                     
                                     <div class="mt-3 space-y-2">
-                                        <div class="flex items-center gap-2">
-                                            <span>Frontend: localhost:${wt.frontendPort || '?'}</span>
-                                            ${wt.frontendPortInUse ? 
-                                                '<span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">Running</span>' : 
-                                                '<span class="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">Stopped</span>'
-                                            }
-                                            ${wt.frontendPortInUse ? `
-                                                <button onclick="stopServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
-                                                    class="px-2 py-0.5 text-xs bg-red-500 text-white rounded hover:bg-red-600">
-                                                    Stop
-                                                </button>
-                                                <button onclick="restartServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
-                                                    class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
-                                                    Restart
-                                                </button>` : 
-                                                `<button onclick="startServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
-                                                    class="px-2 py-0.5 text-xs bg-green-500 text-white rounded hover:bg-green-600">
-                                                    Start
-                                                </button>`
-                                            }
+                                        <div>
+                                            <div class="flex items-center gap-2">
+                                                <span>Frontend: localhost:${wt.frontendPort || '?'}</span>
+                                                ${wt.frontendPortInUse ? 
+                                                    '<span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">Running</span>' : 
+                                                    '<span class="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">Stopped</span>'
+                                                }
+                                                ${wt.frontendPortInUse ? `
+                                                    <button onclick="stopServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
+                                                        class="px-2 py-0.5 text-xs bg-red-500 text-white rounded hover:bg-red-600">
+                                                        Stop
+                                                    </button>
+                                                    <button onclick="restartServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
+                                                        class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
+                                                        Restart
+                                                    </button>` : 
+                                                    `<button onclick="startServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
+                                                        class="px-2 py-0.5 text-xs bg-green-500 text-white rounded hover:bg-green-600">
+                                                        Start
+                                                    </button>`
+                                                }
+                                            </div>
+                                            ${window.serverStatus?.[wt.name]?.frontend?.status === 'error' ? `
+                                                <div class="text-xs text-red-600 mt-1 ml-4">
+                                                    ⚠️ ${window.serverStatus[wt.name].frontend.message}
+                                                </div>
+                                            ` : ''}
                                         </div>
-                                        <div class="flex items-center gap-2">
-                                            <span>Backend: localhost:${wt.backendPort || '?'}</span>
-                                            ${wt.backendPortInUse ? 
-                                                '<span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">Running</span>' : 
-                                                '<span class="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">Stopped</span>'
-                                            }
-                                            ${wt.backendPortInUse ? `
-                                                <button onclick="stopServer('${wt.name}', 'backend', ${wt.backendPort})" 
-                                                    class="px-2 py-0.5 text-xs bg-red-500 text-white rounded hover:bg-red-600">
-                                                    Stop
-                                                </button>
-                                                <button onclick="restartServer('${wt.name}', 'backend', ${wt.backendPort})" 
-                                                    class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
-                                                    Restart
-                                                </button>` : 
-                                                `<button onclick="startServer('${wt.name}', 'backend', ${wt.backendPort})" 
-                                                    class="px-2 py-0.5 text-xs bg-green-500 text-white rounded hover:bg-green-600">
-                                                    Start
-                                                </button>`
-                                            }
+                                        <div>
+                                            <div class="flex items-center gap-2">
+                                                <span>Backend: localhost:${wt.backendPort || '?'}</span>
+                                                ${wt.backendPortInUse ? 
+                                                    '<span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">Running</span>' : 
+                                                    '<span class="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">Stopped</span>'
+                                                }
+                                                ${wt.backendPortInUse ? `
+                                                    <button onclick="stopServer('${wt.name}', 'backend', ${wt.backendPort})" 
+                                                        class="px-2 py-0.5 text-xs bg-red-500 text-white rounded hover:bg-red-600">
+                                                        Stop
+                                                    </button>
+                                                    <button onclick="restartServer('${wt.name}', 'backend', ${wt.backendPort})" 
+                                                        class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
+                                                        Restart
+                                                    </button>` : 
+                                                    `<button onclick="startServer('${wt.name}', 'backend', ${wt.backendPort})" 
+                                                        class="px-2 py-0.5 text-xs bg-green-500 text-white rounded hover:bg-green-600">
+                                                        Start
+                                                    </button>`
+                                                }
+                                            </div>
+                                            ${window.serverStatus?.[wt.name]?.backend?.status === 'error' ? `
+                                                <div class="text-xs text-red-600 mt-1 ml-4">
+                                                    ⚠️ ${window.serverStatus[wt.name].backend.message}
+                                                </div>
+                                            ` : ''}
                                         </div>
                                     </div>
                                     ${assignedSprints.length > 0 ? `
@@ -730,13 +744,20 @@ function renderWorktreesTab() {
                             </div>
                         </div>
                         <div class="mt-3 pt-3 border-t flex justify-between">
-                            ${!wt.gitStatus?.hasChanges ? `
+                            ${wt.gitStatus?.hasChanges ? `
+                                <div class="text-xs text-amber-600 flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    Commit changes to enable deletion
+                                </div>
+                            ` : `
                                 <button onclick="archiveWorktree('${wt.name}')" 
                                     class="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
                                     title="Archive this worktree (removes directory but keeps branch)">
                                     Archive
                                 </button>
-                            ` : '<div></div>'}
+                            `}
                             ${assignedSprints.length > 0 ? `
                                 <button onclick="createSessionForWorktree('${wt.name}')" 
                                     class="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600">
@@ -961,8 +982,19 @@ async function archiveWorktree(worktreeName) {
     
     // Check if worktree has uncommitted changes
     if (worktree.gitStatus?.hasChanges) {
-        alert('Cannot archive worktree with uncommitted changes. Please commit or stash your changes first.');
-        return;
+        const forceDelete = confirm(
+            `Warning: Worktree "${worktreeName}" has uncommitted changes!\n\n` +
+            `Do you want to force delete it anyway?\n` +
+            `This will PERMANENTLY DELETE any uncommitted changes.`
+        );
+        
+        if (!forceDelete) {
+            alert('To safely delete this worktree:\n' +
+                  '1. Commit your changes: git add . && git commit -m "your message"\n' +
+                  '2. Or stash them: git stash\n' +
+                  '3. Then try deleting again');
+            return;
+        }
     }
     
     // Confirmation dialog
@@ -978,7 +1010,12 @@ async function archiveWorktree(worktreeName) {
     }
     
     try {
-        const response = await fetch(`/api/projects/${activeProject}/worktrees/${worktreeName}`, {
+        const url = new URL(`/api/projects/${activeProject}/worktrees/${worktreeName}`, window.location.origin);
+        if (worktree.gitStatus?.hasChanges) {
+            url.searchParams.append('force', 'true');
+        }
+        
+        const response = await fetch(url, {
             method: 'DELETE'
         });
         
@@ -1024,7 +1061,12 @@ async function startServer(worktreeName, serverType, port) {
         
         const result = await response.json();
         
+        // Store server status globally
+        if (!window.serverStatus) window.serverStatus = {};
+        if (!window.serverStatus[worktreeName]) window.serverStatus[worktreeName] = {};
+        
         if (result.success) {
+            window.serverStatus[worktreeName][serverType] = { status: 'starting', message: null };
             alert(`${serverType} server starting on port ${port}...\n\nIt may take a few seconds to fully start.`);
             
             // Reload worktrees after a delay to show updated status
@@ -1033,10 +1075,17 @@ async function startServer(worktreeName, serverType, port) {
                 renderWorktreesTab();
             }, 3000);
         } else {
+            window.serverStatus[worktreeName][serverType] = { status: 'error', message: result.error || 'Unknown error' };
+            renderWorktreesTab(); // Re-render immediately to show error
             alert(`Failed to start ${serverType} server: ${result.error || 'Unknown error'}`);
         }
     } catch (error) {
         console.error('Error starting server:', error);
+        // Store error status
+        if (!window.serverStatus) window.serverStatus = {};
+        if (!window.serverStatus[worktreeName]) window.serverStatus[worktreeName] = {};
+        window.serverStatus[worktreeName][serverType] = { status: 'error', message: error.message };
+        renderWorktreesTab(); // Re-render immediately to show error
         alert('Failed to start server: ' + error.message);
     }
 }
