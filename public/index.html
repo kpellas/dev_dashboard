@@ -182,10 +182,15 @@
         <div id="worktrees" class="tab-content">
             <div class="bg-white rounded-lg shadow p-6">
                 <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-lg font-semibold">Worktree Management</h2>
-                    <button onclick="showCreateWorktree()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
-                        + New Worktree
-                    </button>
+                    <h2 class="text-lg font-semibold">🌳 Worktree Management</h2>
+                    <div class="flex gap-2">
+                        <button onclick="checkPortStatuses()" class="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm" title="Refresh port status">
+                            🔄 Check Ports
+                        </button>
+                        <button onclick="showCreateWorktree()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm">
+                            + New Worktree
+                        </button>
+                    </div>
                 </div>
                 <div id="worktreesList" class="space-y-4">
                     <p class="text-gray-500">Loading worktrees...</p>
@@ -241,7 +246,31 @@
         let branches = [];
         let currentTab = 'overview'; // Track which sprints are assigned to which worktrees
 
+        // Helper function to get relative time
+        function getTimeAgo(date) {
+            const seconds = Math.floor((new Date() - date) / 1000);
+            const intervals = {
+                year: 31536000,
+                month: 2592000,
+                week: 604800,
+                day: 86400,
+                hour: 3600,
+                minute: 60
+            };
+            
+            for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+                const interval = Math.floor(seconds / secondsInUnit);
+                if (interval >= 1) {
+                    return `${interval} ${unit}${interval === 1 ? '' : 's'} ago`;
+                }
+            }
+            return 'just now';
+        }
+
         // Initialize - wait for deferred scripts to load
+        // Expose functions to window for use by other scripts
+        window.loadProjectData = loadProjectData;
+        
         window.addEventListener('load', () => {
             loadData();
         });
@@ -295,9 +324,10 @@
                 const ideasRes = await fetch(`/api/projects/${projectId}/ideas`);
                 ideas = await ideasRes.json();
                 
-                // Load worktrees
+                // Load worktrees with server status
                 const worktreesRes = await fetch(`/api/projects/${projectId}/worktrees`);
                 worktrees = await worktreesRes.json();
+                console.log('Loaded worktrees:', worktrees);
                 
                 // Load sprint assignments from localStorage (or could be from server)
                 const stored = localStorage.getItem(`sprint-assignments-${projectId}`);
@@ -629,6 +659,7 @@
             
             document.getElementById('branchesList').innerHTML = branches.map(branch => {
                 const statusColor = 
+                    branch.status === 'merged' ? 'bg-purple-50 border-purple-300' :
                     branch.status === 'active' ? 'bg-green-50 border-green-300' :
                     branch.status === 'wip' ? 'bg-blue-50 border-blue-300' :
                     branch.status === 'stale' ? 'bg-yellow-50 border-yellow-300' :
@@ -640,31 +671,44 @@
                 return `
                     <div class="border rounded-lg p-4 ${statusColor}">
                         <div class="flex justify-between items-start">
-                            <div>
-                                <p class="font-medium ${branch.current ? 'text-blue-600' : ''}">
-                                    ${branch.current ? '► ' : ''}${branch.name}
-                                    ${branch.tracking ? `→ ${branch.tracking}` : '(local only)'}
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <p class="font-medium ${branch.current ? 'text-blue-600' : ''}">
+                                        ${branch.current ? '► ' : ''}${branch.name}
+                                    </p>
+                                    ${branch.isMerged ? 
+                                        '<span class="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">Merged</span>' :
+                                        hasUncommitted ? 
+                                        `<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+                                            ${branch.uncommittedChanges} uncommitted
+                                        </span>` : 
+                                        hasUnpushed ?
+                                        `<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-medium">
+                                            ${branch.unpushedCommits} unpushed
+                                        </span>` :
+                                        '<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">Clean</span>'
+                                    }
+                                    ${branch.current ? 
+                                        '<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">Current</span>' : ''
+                                    }
+                                </div>
+                                <p class="text-sm text-gray-600">
+                                    <span class="font-mono text-xs">${branch.lastCommitHash}</span> - 
+                                    ${branch.lastCommitMessage || 'No commits'}
                                 </p>
-                                <p class="text-sm text-gray-600 mt-1">${branch.lastCommitMessage || 'No commits'}</p>
-                                <div class="flex gap-3 mt-2 text-xs">
+                                <div class="flex gap-3 mt-2 text-xs text-gray-500">
                                     ${branch.lastCommitDate ? `
-                                        <span class="text-gray-500">
-                                            Last commit: ${new Date(branch.lastCommitDate).toLocaleDateString()}
+                                        <span>
+                                            Last: ${new Date(branch.lastCommitDate).toLocaleDateString()} 
+                                            (${getTimeAgo(new Date(branch.lastCommitDate))})
                                         </span>
                                     ` : ''}
-                                    ${hasUncommitted ? `
-                                        <span class="text-orange-600 font-medium">
-                                            ${branch.uncommittedChanges} uncommitted changes
-                                        </span>
-                                    ` : ''}
-                                    ${hasUnpushed ? `
-                                        <span class="text-blue-600 font-medium">
-                                            ${branch.unpushedCommits} unpushed commits
-                                        </span>
-                                    ` : ''}
+                                    ${branch.tracking ? `
+                                        <span>Tracking: <span class="font-mono">${branch.tracking}</span></span>
+                                    ` : '<span class="text-gray-400">Local only</span>'}
                                     ${branch.behindBy > 0 ? `
                                         <span class="text-red-600 font-medium">
-                                            ${branch.behindBy} commits behind
+                                            ${branch.behindBy} behind
                                         </span>
                                     ` : ''}
                                 </div>
@@ -688,6 +732,12 @@
                                         Checkout
                                     </button>
                                 `}
+                                ${branch.isMerged && !branch.current && branch.name !== 'main' ? `
+                                    <button onclick="deleteMergedBranch('${branch.name}')" 
+                                        class="px-2 py-1 text-xs bg-purple-500 text-white rounded hover:bg-purple-600">
+                                        Delete
+                                    </button>
+                                ` : ''}
                                 ${hasUncommitted || hasUnpushed ? `
                                     <button onclick="showBranchActions('${branch.name}')" 
                                         class="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600">
@@ -722,6 +772,25 @@
             }
             
             alert('Recommended actions for ' + branchName + ':\\n\\n' + actions.join('\\n'));
+        }
+        
+        async function deleteMergedBranch(branchName) {
+            if (confirm(`Delete merged branch '${branchName}'?\n\nThis will run: git branch -d ${branchName}`)) {
+                try {
+                    const res = await fetch(`/api/projects/${activeProject}/branches/${branchName}`, {
+                        method: 'DELETE'
+                    });
+                    if (res.ok) {
+                        alert(`Branch '${branchName}' deleted successfully`);
+                        refreshBranches();
+                    } else {
+                        const error = await res.json();
+                        alert(`Failed to delete branch: ${error.message || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    alert(`Error deleting branch: ${error.message}`);
+                }
+            }
         }
 
         // Project selector change
@@ -824,45 +893,146 @@
         }
 
         function assignSprintToWorktree(sprintName) {
-            if (worktrees.length === 0) {
-                if (confirm('No worktrees exist. Would you like to create one now?')) {
-                    // Store the sprint name to assign after worktree creation
-                    window.pendingSprintAssignment = sprintName;
-                    showCreateWorktree();
-                }
-                return;
-            }
-            
             const currentAssignment = sprintAssignments[sprintName];
             
             showModal(`
                 <h3 class="text-lg font-semibold mb-4">Assign Sprint to Worktree</h3>
                 <p class="text-sm text-gray-600 mb-4">Sprint: <strong>${sprintName}</strong></p>
                 <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium mb-1">Select Worktree</label>
-                        <select id="worktreeSelect" class="w-full px-3 py-2 border rounded">
-                            <option value="">-- Select Worktree --</option>
-                            ${worktrees.map(wt => `
-                                <option value="${wt.name}" ${currentAssignment?.worktree === wt.name ? 'selected' : ''}>
-                                    ${wt.name} (Frontend: ${wt.frontendPort}, Backend: ${wt.backendPort})
-                                </option>
-                            `).join('')}
-                        </select>
+                    ${worktrees.length > 0 ? `
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Select Existing Worktree</label>
+                            <select id="worktreeSelect" class="w-full px-3 py-2 border rounded">
+                                <option value="">-- Select Worktree --</option>
+                                ${worktrees.map(wt => `
+                                    <option value="${wt.name}" ${currentAssignment?.worktree === wt.name ? 'selected' : ''}>
+                                        ${wt.name} (Frontend: ${wt.frontendPort}, Backend: ${wt.backendPort})
+                                    </option>
+                                `).join('')}
+                                <option value="__new__">➕ Create New Worktree...</option>
+                            </select>
+                        </div>
+                    ` : `
+                        <div class="p-3 bg-yellow-50 border border-yellow-200 rounded">
+                            <p class="text-sm text-yellow-800">No worktrees exist yet.</p>
+                            <p class="text-sm text-yellow-800 mt-1">Click "Create New Worktree" to get started.</p>
+                        </div>
+                    `}
+                    
+                    <div id="newWorktreeForm" class="hidden space-y-3 p-3 bg-gray-50 rounded">
+                        <h4 class="text-sm font-semibold">Create New Worktree</h4>
+                        <div>
+                            <label class="block text-xs font-medium mb-1">Worktree Name</label>
+                            <input type="text" id="newWorktreeName" 
+                                placeholder="feature-${sprintName.toLowerCase().replace(/\s+/g, '-')}"
+                                class="w-full px-2 py-1 text-sm border rounded">
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-xs font-medium mb-1">Frontend Port</label>
+                                <input type="number" id="newFrontendPort" placeholder="5174" 
+                                    class="w-full px-2 py-1 text-sm border rounded">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium mb-1">Backend Port</label>
+                                <input type="number" id="newBackendPort" placeholder="3002" 
+                                    class="w-full px-2 py-1 text-sm border rounded">
+                            </div>
+                        </div>
                     </div>
-                    <div class="flex justify-end space-x-2">
-                        <button onclick="hideModal()" class="px-4 py-2 border rounded hover:bg-gray-50">
-                            Cancel
-                        </button>
-                        <button onclick="saveSprintAssignment('${sprintName}')" 
-                            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
-                            Assign
-                        </button>
+                    
+                    <div class="flex justify-between">
+                        ${worktrees.length === 0 ? `
+                            <button onclick="document.getElementById('newWorktreeForm').classList.remove('hidden'); this.style.display='none';" 
+                                class="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600">
+                                ➕ Create New Worktree
+                            </button>
+                        ` : '<div></div>'}
+                        <div class="flex gap-2">
+                            <button onclick="hideModal()" class="px-3 py-1 text-sm border rounded hover:bg-gray-50">
+                                Cancel
+                            </button>
+                            <button onclick="saveSprintAssignmentWithWorktree('${sprintName}')" 
+                                class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600">
+                                Assign
+                            </button>
+                        </div>
                     </div>
                 </div>
             `);
+            
+            // Add change handler for worktree select
+            setTimeout(() => {
+                const select = document.getElementById('worktreeSelect');
+                if (select) {
+                    select.addEventListener('change', (e) => {
+                        const form = document.getElementById('newWorktreeForm');
+                        if (e.target.value === '__new__') {
+                            form.classList.remove('hidden');
+                            // Suggest a name based on sprint
+                            document.getElementById('newWorktreeName').value = 
+                                'feature-' + sprintName.toLowerCase().replace(/\s+/g, '-');
+                        } else {
+                            form.classList.add('hidden');
+                        }
+                    });
+                }
+            }, 100);
         }
 
+        async function saveSprintAssignmentWithWorktree(sprintName) {
+            const worktreeSelect = document.getElementById('worktreeSelect');
+            let worktreeName = worktreeSelect ? worktreeSelect.value : null;
+            
+            // Check if creating new worktree
+            if (worktreeName === '__new__' || !worktreeSelect) {
+                const nameInput = document.getElementById('newWorktreeName');
+                const frontendPort = document.getElementById('newFrontendPort').value || 5174;
+                const backendPort = document.getElementById('newBackendPort').value || 3002;
+                
+                worktreeName = nameInput.value || 'feature-' + sprintName.toLowerCase().replace(/\s+/g, '-');
+                
+                // Create the worktree first
+                try {
+                    const response = await fetch(`/api/projects/${activeProject}/worktrees`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            branchName: worktreeName,
+                            description: `Worktree for ${sprintName} sprint`,
+                            frontendPort: parseInt(frontendPort),
+                            backendPort: parseInt(backendPort)
+                        })
+                    });
+                    
+                    if (!response.ok) throw new Error('Failed to create worktree');
+                    
+                    // Reload worktrees
+                    await loadProjectData(activeProject);
+                } catch (error) {
+                    alert('Failed to create worktree: ' + error.message);
+                    return;
+                }
+            }
+            
+            if (!worktreeName) {
+                alert('Please select or create a worktree');
+                return;
+            }
+            
+            // Save the assignment
+            sprintAssignments[sprintName] = {
+                worktree: worktreeName,
+                assignedAt: new Date().toISOString()
+            };
+            
+            localStorage.setItem(`sprint-assignments-${activeProject}`, JSON.stringify(sprintAssignments));
+            
+            hideModal();
+            updateSprints();
+            updateWorktrees();
+        }
+        
         function saveSprintAssignment(sprintName) {
             const worktreeName = document.getElementById('worktreeSelect').value;
             if (!worktreeName) {
@@ -1349,10 +1519,34 @@ Improve performance"></textarea>
             try {
                 const res = await fetch(`/api/sessions/${sessionId}/prompt`);
                 const prompt = await res.text();
-                await navigator.clipboard.writeText(prompt);
-                alert('Prompt copied to clipboard!');
+                
+                // Try modern clipboard API first
+                try {
+                    await navigator.clipboard.writeText(prompt);
+                    // Show success toast
+                    const toast = document.createElement('div');
+                    toast.textContent = '✅ Prompt copied to clipboard!';
+                    toast.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#10b981;color:white;padding:10px 20px;border-radius:5px;z-index:10000';
+                    document.body.appendChild(toast);
+                    setTimeout(() => document.body.removeChild(toast), 2000);
+                } catch (clipErr) {
+                    // Fallback for older browsers
+                    const textArea = document.createElement('textarea');
+                    textArea.value = prompt;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-999999px';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    try {
+                        document.execCommand('copy');
+                        alert('Prompt copied to clipboard!');
+                    } catch (e) {
+                        alert('Failed to copy. Please copy manually.');
+                    }
+                    document.body.removeChild(textArea);
+                }
             } catch (error) {
-                alert('Failed to copy prompt: ' + error.message);
+                alert('Failed to fetch prompt: ' + error.message);
             }
         }
 

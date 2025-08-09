@@ -627,14 +627,90 @@ function renderWorktreesTab() {
                 // View mode for worktree
                 return `
                     <div class="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                        <div onclick="startWorktreeEdit('${wt.name}')" class="cursor-pointer" title="Click to edit">
-                            <div class="flex justify-between items-start">
+                        <div>
+                            <div class="flex justify-between items-start mb-3">
                                 <div class="flex-1">
-                                    <p class="font-medium text-lg">${wt.name}</p>
-                                    <p class="text-sm text-gray-600">${wt.description || 'No description'}</p>
-                                    <div class="mt-2 space-y-1 text-xs">
-                                        <div>Frontend: localhost:${wt.frontendPort || '?'}</div>
-                                        <div>Backend: localhost:${wt.backendPort || '?'}</div>
+                                    <div class="flex items-center gap-2">
+                                        <p class="font-medium text-lg cursor-pointer" onclick="startWorktreeEdit('${wt.name}')" title="Click to edit">${wt.name}</p>
+                                        ${wt.gitStatus ? 
+                                            wt.gitStatus.hasChanges ? 
+                                                `<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+                                                    ${wt.gitStatus.uncommittedChanges} uncommitted
+                                                </span>` : 
+                                                '<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">Clean</span>'
+                                            : ''
+                                        }
+                                    </div>
+                                    <p class="text-sm text-gray-600 mt-1">${wt.description || 'No description'}</p>
+                                    ${wt.gitStatus?.branch ? `<p class="text-xs text-gray-500">Branch: ${wt.gitStatus.branch}</p>` : ''}
+                                    ${wt.gitStatus?.lastCommit ? `<p class="text-xs text-gray-500">Last: ${wt.gitStatus.lastCommit}</p>` : ''}
+                                    
+                                    ${wt.gitStatus?.hasChanges ? `
+                                        <details class="mt-2 text-xs" onclick="event.stopPropagation()">
+                                            <summary class="cursor-pointer text-blue-600 hover:text-blue-800">
+                                                View ${wt.gitStatus.uncommittedChanges} uncommitted changes
+                                            </summary>
+                                            <div class="mt-1 p-2 bg-gray-50 rounded max-h-32 overflow-y-auto">
+                                                ${wt.gitStatus.modifiedFiles.slice(0, 10).map(file => `
+                                                    <div class="flex items-center gap-1">
+                                                        <span class="text-gray-500">${
+                                                            file.status === 'M' ? '●' :
+                                                            file.status === 'A' ? '+' :
+                                                            file.status === 'D' ? '-' :
+                                                            file.status === '??' ? '?' : '○'
+                                                        }</span>
+                                                        <span>${file.path}</span>
+                                                    </div>
+                                                `).join('')}
+                                                ${wt.gitStatus.modifiedFiles.length > 10 ? 
+                                                    `<div class="text-gray-500 mt-1">... and ${wt.gitStatus.modifiedFiles.length - 10} more</div>` : ''}
+                                            </div>
+                                        </details>
+                                    ` : ''}
+                                    
+                                    <div class="mt-3 space-y-2">
+                                        <div class="flex items-center gap-2">
+                                            <span>Frontend: localhost:${wt.frontendPort || '?'}</span>
+                                            ${wt.frontendPortInUse ? 
+                                                '<span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">Running</span>' : 
+                                                '<span class="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">Stopped</span>'
+                                            }
+                                            ${wt.frontendPortInUse ? `
+                                                <button onclick="stopServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
+                                                    class="px-2 py-0.5 text-xs bg-red-500 text-white rounded hover:bg-red-600">
+                                                    Stop
+                                                </button>
+                                                <button onclick="restartServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
+                                                    class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
+                                                    Restart
+                                                </button>` : 
+                                                `<button onclick="startServer('${wt.name}', 'frontend', ${wt.frontendPort})" 
+                                                    class="px-2 py-0.5 text-xs bg-green-500 text-white rounded hover:bg-green-600">
+                                                    Start
+                                                </button>`
+                                            }
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span>Backend: localhost:${wt.backendPort || '?'}</span>
+                                            ${wt.backendPortInUse ? 
+                                                '<span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">Running</span>' : 
+                                                '<span class="px-1 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">Stopped</span>'
+                                            }
+                                            ${wt.backendPortInUse ? `
+                                                <button onclick="stopServer('${wt.name}', 'backend', ${wt.backendPort})" 
+                                                    class="px-2 py-0.5 text-xs bg-red-500 text-white rounded hover:bg-red-600">
+                                                    Stop
+                                                </button>
+                                                <button onclick="restartServer('${wt.name}', 'backend', ${wt.backendPort})" 
+                                                    class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
+                                                    Restart
+                                                </button>` : 
+                                                `<button onclick="startServer('${wt.name}', 'backend', ${wt.backendPort})" 
+                                                    class="px-2 py-0.5 text-xs bg-green-500 text-white rounded hover:bg-green-600">
+                                                    Start
+                                                </button>`
+                                            }
+                                        </div>
                                     </div>
                                     ${assignedSprints.length > 0 ? `
                                         <div class="mt-3 p-2 bg-blue-50 rounded">
@@ -653,14 +729,21 @@ function renderWorktreesTab() {
                                 </div>
                             </div>
                         </div>
-                        ${assignedSprints.length > 0 ? `
-                            <div class="mt-3 pt-3 border-t flex justify-end">
+                        <div class="mt-3 pt-3 border-t flex justify-between">
+                            ${!wt.gitStatus?.hasChanges ? `
+                                <button onclick="archiveWorktree('${wt.name}')" 
+                                    class="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
+                                    title="Archive this worktree (removes directory but keeps branch)">
+                                    Archive
+                                </button>
+                            ` : '<div></div>'}
+                            ${assignedSprints.length > 0 ? `
                                 <button onclick="createSessionForWorktree('${wt.name}')" 
                                     class="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600">
                                     Create Session
                                 </button>
-                            </div>
-                        ` : ''}
+                            ` : ''}
+                        </div>
                     </div>
                 `;
             }
@@ -725,7 +808,8 @@ async function saveWorktreeChanges(worktreeName) {
 function renderSessionsTab() {
     const projectSessions = sessions.filter(s => s.projectId === activeProject);
     
-    // Use the new enhanced card with tabs if available
+    // PRIMARY: Use renderEnhancedSessionCardWithTabs from session-enhanced.js
+    // This has the tabs (Overview/Start/Complete) and full session management
     if (typeof renderEnhancedSessionCardWithTabs === 'function') {
         document.getElementById('sessionsList').innerHTML = projectSessions.length > 0
             ? projectSessions.map(session => renderEnhancedSessionCardWithTabs(session)).join('')
@@ -867,4 +951,142 @@ function toggleSprintItems(sprintName) {
     renderSprintsTab();
 }
 
+// Worktree and server management functions
+async function archiveWorktree(worktreeName) {
+    const worktree = worktrees.find(wt => wt.name === worktreeName);
+    if (!worktree) {
+        alert('Worktree not found');
+        return;
+    }
+    
+    // Check if worktree has uncommitted changes
+    if (worktree.gitStatus?.hasChanges) {
+        alert('Cannot archive worktree with uncommitted changes. Please commit or stash your changes first.');
+        return;
+    }
+    
+    // Confirmation dialog
+    const message = `Are you sure you want to archive the worktree "${worktreeName}"?\n\n` +
+                   `This will:\n` +
+                   `• Remove the worktree directory\n` +
+                   `• Keep the branch "${worktree.branch || worktreeName}" in git\n` +
+                   `• Free up ports ${worktree.frontendPort} and ${worktree.backendPort}\n\n` +
+                   `You can recreate the worktree later from the branch if needed.`;
+    
+    if (!confirm(message)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/projects/${activeProject}/worktrees/${worktreeName}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            alert(`Worktree "${worktreeName}" has been archived successfully.`);
+            
+            // Reload worktrees
+            await loadProjectData(activeProject);
+            renderWorktreesTab();
+        } else {
+            const error = await response.json();
+            alert(`Failed to archive worktree: ${error.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error archiving worktree:', error);
+        alert('Failed to archive worktree: ' + error.message);
+    }
+}
+
+async function startServer(worktreeName, serverType, port) {
+    const worktree = worktrees.find(wt => wt.name === worktreeName);
+    if (!worktree) {
+        alert('Worktree not found');
+        return;
+    }
+    
+    try {
+        const command = serverType === 'frontend' 
+            ? `npm run dev -- --port ${port}`
+            : `PORT=${port} npm run server`;
+            
+        const response = await fetch('/api/start-server', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                worktreeName,
+                worktreePath: worktree.path,
+                serverType,
+                port,
+                command
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`${serverType} server starting on port ${port}...\n\nIt may take a few seconds to fully start.`);
+            
+            // Reload worktrees after a delay to show updated status
+            setTimeout(async () => {
+                await loadProjectData(activeProject);
+                renderWorktreesTab();
+            }, 3000);
+        } else {
+            alert(`Failed to start ${serverType} server: ${result.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error starting server:', error);
+        alert('Failed to start server: ' + error.message);
+    }
+}
+
+async function stopServer(worktreeName, serverType, port) {
+    if (!confirm(`Stop ${serverType} server on port ${port}?`)) {
+        return;
+    }
+    
+    try {
+        const killRes = await fetch(`/api/kill-port/${port}`, { method: 'POST' });
+        const killData = await killRes.json();
+        
+        if (killData.success) {
+            alert(`${serverType} server on port ${port} has been stopped.`);
+            
+            // Reload worktrees to update port status
+            await loadProjectData(activeProject);
+            renderWorktreesTab();
+        } else {
+            alert(`Failed to stop ${serverType} server: ${killData.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error stopping server:', error);
+        alert('Failed to stop server: ' + error.message);
+    }
+}
+
+async function restartServer(worktreeName, serverType, port) {
+    try {
+        // First stop the server
+        const killRes = await fetch(`/api/kill-port/${port}`, { method: 'POST' });
+        const killData = await killRes.json();
+        
+        if (killData.success) {
+            // Wait a moment then start it again
+            setTimeout(() => {
+                startServer(worktreeName, serverType, port);
+            }, 1000);
+        } else {
+            alert(`Failed to restart ${serverType} server: ${killData.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        console.error('Error restarting server:', error);
+        alert('Failed to restart server: ' + error.message);
+    }
+}
+
 window.toggleSprintItems = toggleSprintItems;
+window.archiveWorktree = archiveWorktree;
+window.startServer = startServer;
+window.stopServer = stopServer;
+window.restartServer = restartServer;

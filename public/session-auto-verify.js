@@ -190,17 +190,51 @@ async function verifyIdeasUpdated(session, report) {
         
         check.details.push(`📊 Sprint status: ${completed} done, ${inProgress} in progress, ${notStarted} not started`);
         
-        // Check if statuses match closure type
-        if (session.closureType === 'COMPLETE' && inProgress > 0) {
-            check.details.push(`⚠️ ${inProgress} items still in progress but session marked complete`);
-            check.status = 'warning';
-            report.warnings++;
-        } else if (session.closureType === 'ABANDON' && (completed > 0 || inProgress > 0)) {
-            check.details.push(`⚠️ Items should be reset to 'new' status when abandoning`);
-            check.status = 'warning';
-            report.warnings++;
-        } else {
-            check.details.push(`✅ Item statuses align with closure type`);
+        // Check if statuses match closure type - be strict about expectations
+        const closureType = session.closureType || 'WIP';
+        let expectationMet = true;
+        
+        switch(closureType) {
+            case 'COMPLETE':
+                if (inProgress > 0) {
+                    check.details.push(`❌ ${inProgress} items still in progress - should be marked done for COMPLETE`);
+                    check.status = 'failed';
+                    report.failed++;
+                    expectationMet = false;
+                } else if (notStarted > 0) {
+                    check.details.push(`⚠️ ${notStarted} items not started - consider moving to next sprint`);
+                    if (check.status !== 'failed') {
+                        check.status = 'warning';
+                        report.warnings++;
+                    }
+                } else {
+                    check.details.push(`✅ All sprint items completed`);
+                }
+                break;
+                
+            case 'WIP':
+                check.details.push(`✅ Items can remain in current state for WIP`);
+                if (inProgress > 0) {
+                    check.details.push(`📌 ${inProgress} items to continue next session`);
+                }
+                break;
+                
+            case 'ABANDON':
+                if (completed > 0 || inProgress > 0) {
+                    check.details.push(`❌ ${completed + inProgress} items should be reset to 'new' for ABANDON`);
+                    check.status = 'failed';
+                    report.failed++;
+                    expectationMet = false;
+                } else {
+                    check.details.push(`✅ All items properly reset to backlog`);
+                }
+                break;
+                
+            default:
+                check.details.push(`✅ Item statuses recorded`);
+        }
+        
+        if (expectationMet && check.status === 'checking') {
             check.status = 'passed';
             report.passed++;
         }
@@ -239,21 +273,42 @@ async function verifyWorktreeState(session, report, closureType) {
         const worktree = worktrees.find(w => w.name === (session.worktreeName || session.worktree));
         
         if (!worktree) {
-            check.details.push(`❌ Worktree not found: ${session.worktreeName || session.worktree}`);
-            check.status = 'failed';
-            report.failed++;
+            // Different expectations based on closure type
+            if (closureType === 'ABANDON') {
+                check.details.push(`✅ Worktree removed after abandon (as expected)`);
+                check.status = 'passed';
+                report.passed++;
+            } else {
+                check.details.push(`❌ Worktree not found: ${session.worktreeName || session.worktree}`);
+                check.status = 'failed';
+                report.failed++;
+            }
         } else {
             check.details.push(`✅ Worktree exists: ${worktree.name}`);
             
             // Check worktree state based on closure type
-            if (closureType === 'COMPLETE') {
-                check.details.push(`📌 Worktree should be ready for PR/merge`);
-            } else if (closureType === 'WIP') {
-                check.details.push(`📌 Worktree preserved for continuation`);
-            } else if (closureType === 'ABANDON') {
-                check.details.push(`⚠️ Consider removing abandoned worktree`);
-                check.status = 'warning';
-                report.warnings++;
+            switch(closureType) {
+                case 'COMPLETE':
+                    check.details.push(`✅ Worktree ready for PR/merge`);
+                    check.details.push(`📌 Next: Create PR with 'gh pr create'`);
+                    break;
+                    
+                case 'WIP':
+                    check.details.push(`✅ Worktree preserved for continuation`);
+                    if (worktree.gitStatus?.hasChanges) {
+                        check.details.push(`📌 ${worktree.gitStatus.uncommittedChanges} uncommitted changes to handle next session`);
+                    }
+                    break;
+                    
+                case 'ABANDON':
+                    check.details.push(`⚠️ Worktree still exists after abandon`);
+                    check.details.push(`📌 Run: git worktree remove ${worktree.name}`);
+                    check.status = 'warning';
+                    report.warnings++;
+                    break;
+                    
+                default:
+                    check.details.push(`✅ Worktree state recorded`);
             }
             
             if (check.status === 'checking') {
@@ -321,33 +376,43 @@ async function verifyNoUncommittedChanges(session, report, closureType) {
         details: []
     };
     
-    if (closureType === 'ABANDON') {
-        check.status = 'skipped';
-        check.details.push(`⏭️ Skipped for abandoned sessions`);
-        report.checks.push(check);
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/git-status?worktree=${session.worktreeName || session.worktree}`);
         const data = response.ok ? await response.json() : { uncommittedChanges: 0, files: [] };
         
         if (data.uncommittedChanges > 0) {
-            if (closureType === 'WIP') {
-                check.details.push(`ℹ️ ${data.uncommittedChanges} uncommitted changes (OK for WIP)`);
-                check.status = 'info';
-            } else {
-                check.details.push(`❌ ${data.uncommittedChanges} uncommitted changes - should be committed!`);
-                check.status = 'failed';
-                report.failed++;
-                
-                // List the files
-                if (data.files && data.files.length > 0) {
-                    const fileList = data.files.slice(0, 5).map(f => `  - ${f.status} ${f.path}`).join('\n');
-                    check.details.push(`Files:\n${fileList}`);
-                    if (data.files.length > 5) {
-                        check.details.push(`  ... and ${data.files.length - 5} more`);
-                    }
+            switch(closureType) {
+                case 'WIP':
+                    check.details.push(`✅ ${data.uncommittedChanges} uncommitted changes (OK for WIP)`);
+                    check.status = 'passed';
+                    report.passed++;
+                    break;
+                    
+                case 'ABANDON':
+                    check.details.push(`⚠️ ${data.uncommittedChanges} uncommitted changes will be lost`);
+                    check.details.push(`📌 Consider stashing: git stash save "Abandoned work"`);
+                    check.status = 'warning';
+                    report.warnings++;
+                    break;
+                    
+                case 'COMPLETE':
+                    check.details.push(`❌ ${data.uncommittedChanges} uncommitted changes - must commit before completing!`);
+                    check.status = 'failed';
+                    report.failed++;
+                    break;
+                    
+                default:
+                    check.details.push(`⚠️ ${data.uncommittedChanges} uncommitted changes detected`);
+                    check.status = 'warning';
+                    report.warnings++;
+            }
+            
+            // List the files for context
+            if (data.files && data.files.length > 0) {
+                const fileList = data.files.slice(0, 5).map(f => `  - ${f.status} ${f.path}`).join('\n');
+                check.details.push(`Files:\n${fileList}`);
+                if (data.files.length > 5) {
+                    check.details.push(`  ... and ${data.files.length - 5} more`);
                 }
             }
         } else {
@@ -371,13 +436,6 @@ async function verifyBranchPushed(session, report, closureType) {
         details: []
     };
     
-    if (closureType === 'ABANDON') {
-        check.status = 'skipped';
-        check.details.push(`⏭️ Skipped for abandoned sessions`);
-        report.checks.push(check);
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/branch-status?worktree=${session.worktreeName || session.worktree}`);
         const data = response.ok ? await response.json() : { error: 'API not available' };
@@ -388,14 +446,27 @@ async function verifyBranchPushed(session, report, closureType) {
             report.failed++;
         } else {
             if (data.unpushedCommits > 0) {
-                if (closureType === 'COMPLETE') {
-                    check.details.push(`❌ ${data.unpushedCommits} commits not pushed - push required!`);
-                    check.status = 'failed';
-                    report.failed++;
-                } else {
-                    check.details.push(`⚠️ ${data.unpushedCommits} unpushed commits`);
-                    check.status = 'warning';
-                    report.warnings++;
+                switch(closureType) {
+                    case 'COMPLETE':
+                        check.details.push(`⚠️ ${data.unpushedCommits} commits not pushed - consider pushing before PR`);
+                        check.status = 'warning';
+                        report.warnings++;
+                        break;
+                        
+                    case 'WIP':
+                        check.details.push(`ℹ️ ${data.unpushedCommits} unpushed commits - push when strategic`);
+                        check.status = 'info';
+                        break;
+                        
+                    case 'ABANDON':
+                        check.details.push(`⚠️ ${data.unpushedCommits} unpushed commits will be lost`);
+                        check.status = 'warning';
+                        report.warnings++;
+                        break;
+                        
+                    default:
+                        check.details.push(`ℹ️ ${data.unpushedCommits} unpushed commits`);
+                        check.status = 'info';
                 }
             } else {
                 check.details.push(`✅ All commits pushed to remote`);
@@ -403,10 +474,14 @@ async function verifyBranchPushed(session, report, closureType) {
                 report.passed++;
             }
             
-            if (data.hasUpstream) {
+            if (!data.hasUpstream && (closureType === 'COMPLETE' || closureType === 'WIP')) {
+                check.details.push(`⚠️ No upstream branch set - use: git push -u origin ${session.worktreeName || session.worktree}`);
+                if (check.status === 'passed') {
+                    check.status = 'warning';
+                    report.warnings++;
+                }
+            } else if (data.hasUpstream) {
                 check.details.push(`✅ Tracking remote branch: ${data.upstream}`);
-            } else if (closureType === 'COMPLETE') {
-                check.details.push(`⚠️ No upstream branch set`);
             }
         }
     } catch (error) {
@@ -631,18 +706,20 @@ function rerunVerification(sessionId, closureType) {
 }
 
 // Hook into the close script generation to trigger verification
-const originalGenerateCloseScriptAuto = window.generateCloseScript;
-window.generateCloseScript = function(sessionId, outcome) {
-    // Call original function
-    if (originalGenerateCloseScriptAuto) {
-        originalGenerateCloseScriptAuto(sessionId, outcome);
-    }
-    
-    // Run automated verification after a delay
-    setTimeout(() => {
-        runAutomatedVerification(sessionId, outcome.toUpperCase());
-    }, 2000);
-};
+// Disabled automatic verification on close script generation
+// Verification is now only triggered manually via the Verify tab
+// const originalGenerateCloseScriptAuto = window.generateCloseScript;
+// window.generateCloseScript = function(sessionId, outcome) {
+//     // Call original function
+//     if (originalGenerateCloseScriptAuto) {
+//         originalGenerateCloseScriptAuto(sessionId, outcome);
+//     }
+//     
+//     // Run automated verification after a delay
+//     setTimeout(() => {
+//         runAutomatedVerification(sessionId, outcome.toUpperCase());
+//     }, 2000);
+// };
 
 // Export functions
 window.runAutomatedVerification = runAutomatedVerification;

@@ -67,31 +67,45 @@ ${itemsList}
 
 ## 📋 Pre-Start Checklist
 
-### 1. Git Setup
+### 1. Git & Worktree Setup
 \`\`\`bash
+# Project configuration
+PROJECT_PATH="/Users/kellypellas/DevProjects/${project.name}"
+WORKTREE_NAME="${session.worktreeName}"
+WORKTREE_PATH="$PROJECT_PATH/worktrees/$WORKTREE_NAME"
+BRANCH="${worktree.branchName || session.worktreeName}"
+
+# Create worktree if it doesn't exist
+if [ ! -d "$WORKTREE_PATH" ]; then
+    echo "Creating worktree..."
+    cd "$PROJECT_PATH"
+    git worktree add "worktrees/$WORKTREE_NAME" -b "$BRANCH" || {
+        # If branch exists, just check it out
+        git worktree add "worktrees/$WORKTREE_NAME" "$BRANCH"
+    }
+fi
+
 # Navigate to worktree
-cd ${worktree.path}
+cd "$WORKTREE_PATH"
 
 # Check git status (should be clean)
 git status
 
-# Pull latest from main
-git checkout main
-git pull origin main
-git checkout ${worktree.branchName || session.worktreeName}
-
-# If branch doesn't exist, create it
-git checkout -b ${worktree.branchName || session.worktreeName}
+# Ensure we're on the correct branch
+git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
 \`\`\`
 
 ### 2. Start Development Servers
 \`\`\`bash
+# Install dependencies if needed
+[[ ! -d "node_modules" ]] && npm install
+
 # Terminal 1 - Frontend (Port ${worktree.frontendPort})
-cd ${worktree.path}/frontend
+cd "$WORKTREE_PATH"
 npm run dev -- --port ${worktree.frontendPort}
 
-# Terminal 2 - Backend (Port ${worktree.backendPort})
-cd ${worktree.path}/backend
+# Terminal 2 - Backend (Port ${worktree.backendPort})  
+cd "$WORKTREE_PATH"
 PORT=${worktree.backendPort} npm run server
 \`\`\`
 

@@ -1,4 +1,6 @@
 // Enhanced session card with tab-based progression
+// THIS IS THE PRIMARY SESSION CARD RENDERER USED BY THE DASHBOARD
+// It provides tabs for Overview/Start/Complete and full session management
 
 function renderEnhancedSessionCardWithTabs(session) {
     const isExpanded = window.expandedSessionId === session.sessionId;
@@ -39,6 +41,11 @@ function renderEnhancedSessionCardWithTabs(session) {
                     <span class="px-2 py-1 text-xs font-medium bg-white rounded">
                         ${state}
                     </span>
+                    <button onclick="event.stopPropagation(); deleteSession('${session.sessionId}')" 
+                        class="px-2 py-1 text-xs bg-gray-600 text-white rounded hover:bg-gray-700"
+                        title="Delete session">
+                        Delete
+                    </button>
                     <button onclick="event.stopPropagation(); toggleSessionExpand('${session.sessionId}')" 
                         class="text-xs text-blue-600 hover:text-blue-800">
                         ${isExpanded ? '▼ Collapse' : '▶ Expand'}
@@ -60,13 +67,19 @@ function renderEnhancedSessionCardWithTabs(session) {
                             class="px-3 py-1 text-xs font-medium border-b-2 transition-colors ${
                                 activeTab === 'start' ? 'border-blue-500 text-blue-600' : 'border-transparent hover:text-gray-700'
                             }">
-                            Start
+                            📜 Start Script
                         </button>
                         <button onclick="event.stopPropagation(); showSessionTab('${session.sessionId}', 'complete')" 
                             class="px-3 py-1 text-xs font-medium border-b-2 transition-colors ${
                                 activeTab === 'complete' ? 'border-blue-500 text-blue-600' : 'border-transparent hover:text-gray-700'
                             }">
-                            Complete/Stop
+                            🏁 Close Script
+                        </button>
+                        <button onclick="event.stopPropagation(); showSessionTab('${session.sessionId}', 'verify')" 
+                            class="px-3 py-1 text-xs font-medium border-b-2 transition-colors ${
+                                activeTab === 'verify' ? 'border-blue-500 text-blue-600' : 'border-transparent hover:text-gray-700'
+                            }">
+                            ✅ Verify
                         </button>
                     </div>
                     
@@ -118,12 +131,26 @@ function renderEnhancedSessionCardWithTabs(session) {
 # Quick Sprint Session Setup - ${sprintName}
 
 # CONFIGURATION
-WORKTREE_PATH="${session.workingPath || `/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}`}"
+PROJECT_PATH="/Users/kellypellas/DevProjects/${activeProject}"
+WORKTREE_NAME="${worktreeName}"
+WORKTREE_PATH="$PROJECT_PATH/worktrees/$WORKTREE_NAME"
 BRANCH="${worktreeName}"
 FRONTEND_PORT=${session.frontendPort || 5173}
 BACKEND_PORT=${session.backendPort || 3001}
 
 echo "🚀 Starting Sprint: ${sprintName}"
+echo "📁 Project: ${activeProject}"
+echo "🌳 Worktree: $WORKTREE_NAME"
+
+# Create worktree if it doesn't exist
+if [ ! -d "$WORKTREE_PATH" ]; then
+    echo "Creating worktree..."
+    cd "$PROJECT_PATH" || exit 1
+    git worktree add "worktrees/$WORKTREE_NAME" -b "$BRANCH" || {
+        # If branch exists, just check it out
+        git worktree add "worktrees/$WORKTREE_NAME" "$BRANCH"
+    }
+fi
 
 # Navigate to worktree
 cd "$WORKTREE_PATH" || exit 1
@@ -199,22 +226,16 @@ ${sprintItems.map((item, i) => `
                                 <div>
                                     <h4 class="text-sm font-semibold mb-2">How are you ending this session?</h4>
                                     <div class="space-y-2">
-                                        <button onclick="event.stopPropagation(); generateCloseScript('${session.sessionId}', 'stop')" 
-                                            class="w-full p-3 text-left border rounded hover:bg-gray-50 transition-colors">
-                                            <div class="font-medium text-sm">🛑 Quick Stop</div>
-                                            <div class="text-xs text-gray-600 mt-1">Just stopping servers for a break (WIP commit optional)</div>
-                                        </button>
-                                        
                                         <button onclick="event.stopPropagation(); generateCloseScript('${session.sessionId}', 'wip')" 
                                             class="w-full p-3 text-left border rounded hover:bg-orange-50 transition-colors">
                                             <div class="font-medium text-sm">🔄 Work in Progress</div>
-                                            <div class="text-xs text-gray-600 mt-1">Save progress, will continue in next session</div>
+                                            <div class="text-xs text-gray-600 mt-1">Commit and save progress, will continue later</div>
                                         </button>
                                         
                                         <button onclick="event.stopPropagation(); generateCloseScript('${session.sessionId}', 'complete')" 
                                             class="w-full p-3 text-left border rounded hover:bg-green-50 transition-colors">
                                             <div class="font-medium text-sm">✅ Complete & Merge</div>
-                                            <div class="text-xs text-gray-600 mt-1">Work is done, ready to merge</div>
+                                            <div class="text-xs text-gray-600 mt-1">Work is done, ready to ship to main</div>
                                         </button>
                                         
                                         <button onclick="event.stopPropagation(); generateCloseScript('${session.sessionId}', 'abandon')" 
@@ -227,6 +248,37 @@ ${sprintItems.map((item, i) => `
                                 
                                 <div id="closeScript-${session.sessionId}" class="hidden">
                                     <!-- Script will be generated here when option is selected -->
+                                </div>
+                            </div>
+                        ` : activeTab === 'verify' ? `
+                            <!-- Verification Tab -->
+                            <div class="space-y-3">
+                                <div class="bg-blue-50 p-3 rounded">
+                                    <h4 class="text-sm font-semibold mb-2">📋 Session Verification</h4>
+                                    <p class="text-xs text-gray-600 mb-3">
+                                        Run these checks after you've executed your close script to verify the session was properly closed.
+                                    </p>
+                                </div>
+                                
+                                <button onclick="event.stopPropagation(); runVerification('${session.sessionId}')" 
+                                    class="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium">
+                                    Run Verification Checks
+                                </button>
+                                
+                                <div id="verificationResults-${session.sessionId}" class="hidden">
+                                    <!-- Verification results will appear here -->
+                                </div>
+                                
+                                <div class="text-xs text-gray-500 space-y-1">
+                                    <p>Verification will check:</p>
+                                    <ul class="list-disc list-inside ml-2">
+                                        <li>Git status and commits</li>
+                                        <li>Branch push status</li>
+                                        <li>Server shutdown status</li>
+                                        <li>Port availability</li>
+                                        <li>Ideas.json updates</li>
+                                        <li>Session completion status</li>
+                                    </ul>
                                 </div>
                             </div>
                         ` : ''}
@@ -277,12 +329,26 @@ function copyStartPrompt(sessionId) {
 # Quick Sprint Session Setup - ${sprintName}
 
 # CONFIGURATION
-WORKTREE_PATH="${session.workingPath || `/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}`}"
+PROJECT_PATH="/Users/kellypellas/DevProjects/${activeProject}"
+WORKTREE_NAME="${worktreeName}"
+WORKTREE_PATH="$PROJECT_PATH/worktrees/$WORKTREE_NAME"
 BRANCH="${worktreeName}"
 FRONTEND_PORT=${session.frontendPort || 5173}
 BACKEND_PORT=${session.backendPort || 3001}
 
 echo "🚀 Starting Sprint: ${sprintName}"
+echo "📁 Project: ${activeProject}"
+echo "🌳 Worktree: $WORKTREE_NAME"
+
+# Create worktree if it doesn't exist
+if [ ! -d "$WORKTREE_PATH" ]; then
+    echo "Creating worktree..."
+    cd "$PROJECT_PATH" || exit 1
+    git worktree add "worktrees/$WORKTREE_NAME" -b "$BRANCH" || {
+        # If branch exists, just check it out
+        git worktree add "worktrees/$WORKTREE_NAME" "$BRANCH"
+    }
+fi
 
 # Navigate to worktree
 cd "$WORKTREE_PATH" || exit 1
@@ -343,6 +409,10 @@ function generateCloseScript(sessionId, outcome) {
     const session = sessions.find(s => s.sessionId === sessionId);
     if (!session) return;
     
+    // Store the closure type for verification to use later
+    session.closureType = outcome.toUpperCase();
+    session.lastCloseAction = outcome.toUpperCase();
+    
     const sprintName = session.sprintName || session.sprint;
     const worktreeName = session.worktreeName || session.worktree;
     const sprintItems = ideas?.items?.filter(item => 
@@ -354,24 +424,7 @@ function generateCloseScript(sessionId, outcome) {
     
     let prompt = '';
     
-    if (outcome === 'stop') {
-        prompt = `# 🛑 Quick Stop - ${sprintName}
-
-## Stop Servers
-\`\`\`bash
-lsof -ti:${session.frontendPort || 5173} | xargs kill -9
-lsof -ti:${session.backendPort || 3001} | xargs kill -9
-\`\`\`
-
-## Optional: Save WIP
-\`\`\`bash
-git add -A
-git commit -m "WIP: ${sprintName} checkpoint"
-\`\`\`
-
-✅ Session paused - resume anytime`;
-        
-    } else if (outcome === 'wip') {
+    if (outcome === 'wip') {
         prompt = `# 🔄 Work in Progress - ${sprintName}
 
 ## Session Summary
@@ -484,6 +537,72 @@ ${sprintItems.filter(i => i.status !== 'new').map(i => `- [${i.id}] ${i.title}`)
             </div>
         `;
     }
+}
+
+function runVerification(sessionId) {
+    const session = sessions.find(s => s.sessionId === sessionId);
+    if (!session) return;
+    
+    // Determine closure type - check both closureType and any recent close action
+    // The closureType should be set when user selects an option in the Complete tab
+    let closureType = session.closureType || session.lastCloseAction || 'WIP';
+    
+    // Ensure it's uppercase for consistency
+    closureType = closureType.toUpperCase();
+    
+    // Store it for the verification to use
+    session.closureType = closureType;
+    
+    // Use the comprehensive automated verification from session-auto-verify.js
+    if (window.runAutomatedVerification) {
+        window.runAutomatedVerification(sessionId, closureType);
+    } else {
+        // Fallback to the simpler summary if auto-verify isn't loaded
+        showPostSessionSummary(sessionId);
+    }
+    
+    // Also show inline verification status in the tab
+    const sprintName = session.sprintName || session.sprint;
+    const worktreeName = session.worktreeName || session.worktree;
+    const resultsDiv = document.getElementById(`verificationResults-${sessionId}`);
+    
+    if (!resultsDiv) return;
+    
+    // Show results div
+    resultsDiv.classList.remove('hidden');
+    resultsDiv.innerHTML = `
+        <div class="border rounded p-3 mt-3 bg-gray-50">
+            <h4 class="text-sm font-semibold mb-2">📊 Verification Running...</h4>
+            <div class="text-xs space-y-2">
+                <p class="text-green-600 font-medium">✅ Full verification report will appear above</p>
+                
+                <div class="mt-3 p-2 bg-yellow-50 rounded">
+                    <div class="font-semibold">Manual Verification Commands:</div>
+                    <pre class="mt-1 text-xs">
+# Check git status
+git status
+
+# Check if branch was pushed  
+git log origin/${worktreeName}..${worktreeName}
+
+# Check ports
+lsof -ti:${session.frontendPort || 5173}
+lsof -ti:${session.backendPort || 3001}
+
+# Verify ideas.json updates
+git diff HEAD~1 ideas.json
+</pre>
+                </div>
+                
+                <div class="mt-3">
+                    <button onclick="navigator.clipboard.writeText(\`git status; git log origin/${worktreeName}..${worktreeName}; lsof -ti:${session.frontendPort || 5173}; lsof -ti:${session.backendPort || 3001}\`); alert('Verification commands copied!');" 
+                        class="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Copy Verification Commands
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function copyScript(scriptType, sessionId) {
@@ -680,6 +799,7 @@ window.copyCommand = copyCommand;
 window.generateCloseScript = generateCloseScript;
 window.copyScript = copyScript;
 window.markSessionStarted = markSessionStarted;
+window.runVerification = runVerification;
 window.updateItemStatus = updateItemStatus;
 window.completeSession = completeSession;
 
@@ -896,34 +1016,9 @@ function showPostSessionSummary(sessionId) {
     }, 30000);
 }
 
-// Enhanced generateCloseScript to trigger summary
-const originalGenerateCloseScript = window.generateCloseScript;
-window.generateCloseScript = function(sessionId, outcome) {
-    // Call original function
-    originalGenerateCloseScript(sessionId, outcome);
-    
-    // Mark session as closed
-    const session = sessions.find(s => s.sessionId === sessionId);
-    if (session) {
-        session.closureType = outcome.toUpperCase();
-        session.closedAt = new Date().toISOString();
-        
-        // Calculate duration if we have start time
-        if (session.startedAt) {
-            const start = new Date(session.startedAt);
-            const end = new Date(session.closedAt);
-            const minutes = Math.floor((end - start) / (1000 * 60));
-            const hours = Math.floor(minutes / 60);
-            const mins = minutes % 60;
-            session.duration = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-        }
-        
-        // Show post-session summary after a short delay
-        setTimeout(() => {
-            showPostSessionSummary(sessionId);
-        }, 1000);
-    }
-};
+// Removed enhanced generateCloseScript wrapper
+// Verification is now only triggered manually via the Verify tab
+// The original generateCloseScript function handles everything needed
 
 window.verifySessionClosure = verifySessionClosure;
 window.showPostSessionSummary = showPostSessionSummary;

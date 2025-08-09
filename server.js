@@ -8,6 +8,30 @@ const execPromise = util.promisify(exec);
 const app = express();
 const PORT = 9000;
 
+// Helper function to check if port is in use
+async function isPortInUse(port) {
+  try {
+    const { stdout } = await execPromise(`lsof -ti:${port} | wc -l`);
+    const count = parseInt(stdout.trim());
+    return count > 0;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Helper function to find available port
+async function findAvailablePort(basePort, maxAttempts = 20) {
+  let port = basePort;
+  for (let i = 0; i < maxAttempts; i++) {
+    const inUse = await isPortInUse(port);
+    if (!inUse) {
+      return port;
+    }
+    port++;
+  }
+  throw new Error(`Could not find available port after ${maxAttempts} attempts starting from ${basePort}`);
+}
+
 // Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -137,9 +161,59 @@ app.get('/api/projects/:projectId/worktrees', async (req, res) => {
           // No config file
         }
         
+        // Check git status for uncommitted changes
+        let gitStatus = {};
+        try {
+          const statusOutput = await execPromise(`cd ${wtPath} && git status --porcelain`);
+          const statusLines = statusOutput.stdout.trim().split('\n').filter(Boolean);
+          const modifiedFiles = statusLines.map(line => ({
+            status: line.substring(0, 2).trim(),
+            path: line.substring(3)
+          }));
+          
+          const lastCommit = await execPromise(`cd ${wtPath} && git log -1 --format="%h %s" 2>/dev/null`).catch(() => ({ stdout: '' }));
+          const branch = await execPromise(`cd ${wtPath} && git branch --show-current`).catch(() => ({ stdout: wt }));
+          
+          gitStatus = {
+            hasChanges: statusLines.length > 0,
+            uncommittedChanges: statusLines.length,
+            modifiedFiles: modifiedFiles.slice(0, 10),
+            lastCommit: lastCommit.stdout.trim(),
+            branch: branch.stdout.trim() || wt
+          };
+        } catch (error) {
+          gitStatus = { error: 'Could not get git status' };
+        }
+        
+        // Check if ports are in use
+        const frontendPort = config.frontendPort || 5173;
+        const backendPort = config.backendPort || 3001;
+        
+        let frontendPortInUse = false;
+        let backendPortInUse = false;
+        
+        try {
+          const frontendCheck = await execPromise(`lsof -ti:${frontendPort} | wc -l`);
+          frontendPortInUse = parseInt(frontendCheck.stdout.trim()) > 0;
+        } catch (e) {
+          frontendPortInUse = false;
+        }
+        
+        try {
+          const backendCheck = await execPromise(`lsof -ti:${backendPort} | wc -l`);
+          backendPortInUse = parseInt(backendCheck.stdout.trim()) > 0;
+        } catch (e) {
+          backendPortInUse = false;
+        }
+        
         worktreeData.push({
           name: wt,
           path: wtPath,
+          frontendPort,
+          backendPort,
+          frontendPortInUse,
+          backendPortInUse,
+          gitStatus,
           ...config
         });
       }
@@ -168,11 +242,14 @@ app.post('/api/projects/:projectId/worktrees', async (req, res) => {
       `cd ${project.path} && git worktree add worktrees/${branchName} -b ${branchName}`
     );
     
-    // Allocate ports (simplified - just increment from base)
+    // Allocate ports - find available ones
     const worktrees = await fs.readdir(path.join(project.path, 'worktrees'));
     const index = worktrees.length;
-    const frontendPort = 5173 + index;
-    const backendPort = 3001 + index;
+    const baseFrontendPort = 5173 + index;
+    const baseBackendPort = 3001 + index;
+    
+    const frontendPort = await findAvailablePort(baseFrontendPort);
+    const backendPort = await findAvailablePort(baseBackendPort);
     
     // Save config
     const config = {
@@ -194,6 +271,26 @@ app.post('/api/projects/:projectId/worktrees', async (req, res) => {
   }
 });
 
+// Archive (remove) worktree
+app.delete('/api/projects/:projectId/worktrees/:worktreeName', async (req, res) => {
+  const { projectId, worktreeName } = req.params;
+  const data = await loadProjects();
+  const project = data.projects[projectId];
+  
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+  
+  try {
+    // Remove the worktree
+    await execPromise(`cd ${project.path} && git worktree remove worktrees/${worktreeName}`);
+    
+    res.json({ success: true, message: `Worktree ${worktreeName} archived successfully` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get all sessions
 app.get('/api/sessions', async (req, res) => {
   try {
@@ -208,6 +305,24 @@ app.get('/api/sessions', async (req, res) => {
         const data = JSON.parse(
           await fs.readFile(path.join(sessionsPath, file), 'utf8')
         );
+        // Try to get git status for the worktree
+        let gitStatus = {};
+        if (data.worktree?.path) {
+          try {
+            const statusOutput = await execPromise(`cd ${data.worktree.path} && git status --porcelain`);
+            const statusLines = statusOutput.stdout.trim().split('\n').filter(Boolean);
+            gitStatus = {
+              hasChanges: statusLines.length > 0,
+              uncommittedChanges: statusLines.length,
+              branch: data.worktreeName
+            };
+          } catch (error) {
+            gitStatus = { error: 'Worktree not found or not a git repository' };
+          }
+        } else {
+          gitStatus = { error: 'Worktree path not specified' };
+        }
+        
         sessions.push({
           sessionId: data.sessionId,
           projectId: data.projectId,
@@ -218,7 +333,8 @@ app.get('/api/sessions', async (req, res) => {
           status: data.status,
           state: data.state,
           created: data.created,
-          notes: data.notes
+          notes: data.notes,
+          gitStatus
         });
       }
     }
@@ -396,6 +512,48 @@ app.delete('/api/sessions/:sessionId', async (req, res) => {
   }
 });
 
+// Delete a branch
+app.delete('/api/projects/:projectId/branches/:branchName', async (req, res) => {
+  const { projectId, branchName } = req.params;
+  const data = await loadProjects();
+  const project = data.projects[projectId];
+  
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+  
+  // Don't allow deleting main or master
+  if (branchName === 'main' || branchName === 'master') {
+    return res.status(400).json({ error: 'Cannot delete main branch' });
+  }
+  
+  try {
+    // Check if branch is current
+    const { stdout: currentBranch } = await execPromise(
+      `cd ${project.path} && git branch --show-current`
+    );
+    
+    if (currentBranch.trim() === branchName) {
+      return res.status(400).json({ error: 'Cannot delete current branch' });
+    }
+    
+    // Delete the branch (use -d for safety, only deletes if merged)
+    await execPromise(`cd ${project.path} && git branch -d ${branchName}`);
+    
+    res.json({ success: true, message: `Branch ${branchName} deleted` });
+  } catch (error) {
+    // If -d fails, the branch might not be merged
+    if (error.message.includes('not fully merged')) {
+      res.status(400).json({ 
+        error: 'Branch is not fully merged. Use force delete if you\'re sure.',
+        needsForce: true 
+      });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+});
+
 // Get project branches
 app.get('/api/projects/:projectId/branches', async (req, res) => {
   const { projectId } = req.params;
@@ -426,8 +584,8 @@ app.get('/api/projects/:projectId/branches', async (req, res) => {
       const cleanLine = line.replace(/^\*?\s+/, '');
       const [branchName, commit, ...messageParts] = cleanLine.split(/\s+/);
       
-      // Skip remote tracking branches for now
-      if (branchName.startsWith('remotes/')) continue;
+      // Skip empty lines, remote tracking branches, and invalid entries
+      if (!branchName || branchName.startsWith('remotes/') || branchName === 'undefined') continue;
       
       // Get more details for each branch
       try {
@@ -476,6 +634,19 @@ app.get('/api/projects/:projectId/branches', async (req, res) => {
           // No worktrees
         }
         
+        // Check if branch is merged to main
+        let isMerged = false;
+        try {
+          const { stdout: mergedBranches } = await execPromise(
+            `cd ${project.path} && git branch --merged main 2>/dev/null`
+          );
+          isMerged = mergedBranches.split('\n')
+            .map(b => b.trim().replace('* ', ''))
+            .includes(branchName);
+        } catch (e) {
+          // Can't check merge status
+        }
+        
         branches.push({
           name: branchName,
           current: isCurrent,
@@ -486,7 +657,9 @@ app.get('/api/projects/:projectId/branches', async (req, res) => {
           unpushedCommits,
           tracking,
           relatedWorktree,
-          status: uncommittedChanges > 0 ? 'wip' : 
+          isMerged,
+          status: isMerged ? 'merged' :
+                  uncommittedChanges > 0 ? 'wip' : 
                   unpushedCommits > 0 ? 'unpushed' : 
                   'clean'
         });
@@ -913,6 +1086,68 @@ app.post('/api/session-prompt', async (req, res) => {
     res.json({ success: true, filename });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Start a server in a worktree
+app.post('/api/start-server', async (req, res) => {
+  const { worktreeName, worktreePath, serverType, port, command } = req.body;
+  
+  try {
+    // Check if port is already in use
+    const inUse = await isPortInUse(port);
+    if (inUse) {
+      return res.json({ 
+        success: false, 
+        error: `Port ${port} is already in use` 
+      });
+    }
+    
+    // Start the server in the background
+    const { exec } = require('child_process');
+    const serverProcess = exec(command, {
+      cwd: worktreePath,
+      detached: true,
+      stdio: 'ignore'
+    });
+    
+    // Detach the process so it continues running
+    serverProcess.unref();
+    
+    res.json({ 
+      success: true, 
+      message: `${serverType} server starting on port ${port}`,
+      pid: serverProcess.pid 
+    });
+  } catch (error) {
+    console.error('Error starting server:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Kill a process on a specific port
+app.post('/api/kill-port/:port', async (req, res) => {
+  const { port } = req.params;
+  
+  try {
+    // Find and kill processes on the port
+    const { stdout } = await execPromise(`lsof -ti:${port}`);
+    const pids = stdout.trim().split('\n').filter(Boolean);
+    
+    if (pids.length > 0) {
+      for (const pid of pids) {
+        await execPromise(`kill -9 ${pid}`);
+      }
+      res.json({ success: true, message: `Killed ${pids.length} process(es) on port ${port}` });
+    } else {
+      res.json({ success: true, message: `No processes found on port ${port}` });
+    }
+  } catch (error) {
+    // lsof returns error if no process found, which is OK
+    res.json({ success: true, message: `Port ${port} is now free` });
   }
 });
 
