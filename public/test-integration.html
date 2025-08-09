@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Integration Test</title>
+    <link href="https://cdn.tailwindcss.com" rel="stylesheet">
+    <script src="session-management.js"></script>
+    <script src="dashboard-improvements.js"></script>
+</head>
+<body class="p-8 bg-gray-50">
+    <h1 class="text-2xl font-bold mb-4">Session Integration Test</h1>
+    
+    <div class="bg-white rounded-lg shadow p-6 mb-4">
+        <h2 class="text-lg font-semibold mb-2">Function Availability Check</h2>
+        <div id="status" class="space-y-1 text-sm font-mono"></div>
+    </div>
+    
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-semibold mb-4">Sessions List</h2>
+        <div id="sessionsList"></div>
+    </div>
+    
+    <script>
+        // Set up global state
+        window.sessions = [
+            {
+                sessionId: "20250809-Test-feature",
+                projectId: "test",
+                projectName: "Test Project",
+                sprintName: "Test Sprint",
+                worktreeName: "test-worktree",
+                items: [
+                    {id: "1", title: "Test Item 1", status: "new", description: "First test item"},
+                    {id: "2", title: "Test Item 2", status: "in_progress", description: "Second test item"}
+                ],
+                status: "ready",
+                state: "in_progress",
+                created: new Date().toISOString(),
+                checklist: {
+                    start: {
+                        'git_status': true,
+                        'pull_latest': true,
+                        'create_branch': false,
+                        'start_frontend': false
+                    }
+                }
+            },
+            {
+                sessionId: "20250809-Critical-main",
+                projectId: "test",
+                projectName: "Test Project",
+                sprintName: "Critical Fixes",
+                worktreeName: "main-fixes",
+                items: [{id: "3", title: "Critical Bug", status: "new"}],
+                status: "ready",
+                state: "planned",
+                created: new Date(Date.now() - 86400000).toISOString()
+            }
+        ];
+        window.activeProject = "test";
+        window.projects = {
+            test: {
+                name: "Test Project",
+                path: "/test/path"
+            }
+        };
+        window.worktrees = [
+            {name: "test-worktree", frontendPort: 5173, backendPort: 3001},
+            {name: "main-fixes", frontendPort: 5174, backendPort: 3002}
+        ];
+        window.ideas = {
+            items: []
+        };
+        
+        // Check function availability
+        function checkFunctions() {
+            const status = document.getElementById('status');
+            const functions = [
+                'renderEnhancedSessionCard',
+                'renderSessionsTab',
+                'toggleSessionExpand',
+                'startSession',
+                'closeSession',
+                'SESSION_STATES'
+            ];
+            
+            let html = '';
+            functions.forEach(fn => {
+                const available = typeof window[fn] !== 'undefined';
+                const color = available ? 'text-green-600' : 'text-red-600';
+                const icon = available ? '✓' : '✗';
+                html += `<div class="${color}">${icon} ${fn}: ${typeof window[fn]}</div>`;
+            });
+            
+            status.innerHTML = html;
+        }
+        
+        // Render sessions after a short delay
+        setTimeout(() => {
+            checkFunctions();
+            
+            // Try to render sessions
+            if (typeof renderSessionsTab === 'function') {
+                console.log('Using renderSessionsTab');
+                renderSessionsTab();
+            } else if (typeof renderEnhancedSessionCard === 'function') {
+                console.log('Using renderEnhancedSessionCard directly');
+                const projectSessions = sessions.filter(s => s.projectId === activeProject);
+                document.getElementById('sessionsList').innerHTML = projectSessions
+                    .map(session => renderEnhancedSessionCard(session))
+                    .join('');
+            } else {
+                console.log('No render functions available');
+                document.getElementById('sessionsList').innerHTML = 
+                    '<p class="text-red-500">No render functions available!</p>';
+            }
+        }, 100);
+    </script>
+</body>
+</html>

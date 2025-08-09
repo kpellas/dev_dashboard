@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Comprehensive Dashboard Test</title>
+    <link href="https://cdn.tailwindcss.com" rel="stylesheet">
+    <script src="session-management.js" defer></script>
+    <script src="dashboard-improvements.js" defer></script>
+</head>
+<body class="p-8 bg-gray-50">
+    <h1 class="text-2xl font-bold mb-6">Comprehensive Dashboard Test</h1>
+    
+    <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="bg-white rounded-lg shadow p-4">
+            <h2 class="font-bold mb-2">Function Status:</h2>
+            <div id="functionStatus" class="text-xs font-mono space-y-1"></div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-4">
+            <h2 class="font-bold mb-2">Test Results:</h2>
+            <div id="testResults" class="text-sm space-y-1"></div>
+        </div>
+    </div>
+    
+    <div class="space-y-4">
+        <div class="bg-white rounded-lg shadow p-4">
+            <h2 class="font-bold mb-2">Ideas & Issues (Click to edit):</h2>
+            <div id="ideasList"></div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow p-4">
+            <h2 class="font-bold mb-2">Sessions (Click to expand):</h2>
+            <div id="sessionsList"></div>
+        </div>
+    </div>
+    
+    <script>
+        // Setup test data
+        window.ideas = {
+            items: [
+                {
+                    id: 'bug-1',
+                    type: 'bug',
+                    title: 'CLICK THIS CARD TO EDIT',
+                    description: 'If edit works, this card will become editable',
+                    priority: 'high',
+                    status: 'new'
+                }
+            ],
+            sprints: { 'Sprint 1': {} }
+        };
+        
+        window.sessions = [
+            {
+                sessionId: "TEST-SESSION-1",
+                projectId: "test",
+                sprint: "Test Sprint",
+                worktree: "test-branch",
+                items: 3,
+                status: "ready",
+                created: new Date().toISOString()
+            }
+        ];
+        
+        window.activeProject = "test";
+        window.projects = {};
+        window.worktrees = [];
+        window.editingItemId = null;
+        
+        window.addEventListener('load', () => {
+            const functionStatus = document.getElementById('functionStatus');
+            const testResults = document.getElementById('testResults');
+            
+            // Check all required functions
+            const requiredFunctions = {
+                'Ideas': ['renderIdeasTab', 'startEdit', 'cancelEdit', 'saveItemChanges'],
+                'Sessions': ['renderSessionsTab', 'renderEnhancedSessionCard', 'toggleSessionExpand'],
+                'Sprints': ['renderSprintsTab', 'startSprintEdit'],
+                'Worktrees': ['renderWorktreesTab', 'startWorktreeEdit']
+            };
+            
+            let allGood = true;
+            Object.entries(requiredFunctions).forEach(([category, funcs]) => {
+                const categoryOk = funcs.every(f => typeof window[f] === 'function');
+                allGood = allGood && categoryOk;
+                
+                functionStatus.innerHTML += `<div class="${categoryOk ? 'text-green-600' : 'text-red-600'}">
+                    ${categoryOk ? '✓' : '✗'} ${category}: ${funcs.map(f => 
+                        typeof window[f] === 'function' ? '✓' : '✗ ' + f
+                    ).join(', ')}
+                </div>`;
+            });
+            
+            // Test Ideas rendering
+            if (typeof window.renderIdeasTab === 'function') {
+                window.renderIdeasTab();
+                const ideasHtml = document.getElementById('ideasList').innerHTML;
+                const hasEditHandler = ideasHtml.includes('onclick="startEdit');
+                testResults.innerHTML += `<div class="${hasEditHandler ? 'text-green-600' : 'text-red-600'}">
+                    ${hasEditHandler ? '✓' : '✗'} Ideas have click-to-edit handlers
+                </div>`;
+            }
+            
+            // Test Sessions rendering
+            if (typeof window.renderSessionsTab === 'function') {
+                window.renderSessionsTab();
+                const sessionsHtml = document.getElementById('sessionsList').innerHTML;
+                const hasEnhanced = sessionsHtml.includes('border-2') && sessionsHtml.includes('Expand');
+                testResults.innerHTML += `<div class="${hasEnhanced ? 'text-green-600' : 'text-red-600'}">
+                    ${hasEnhanced ? '✓' : '✗'} Sessions have enhanced cards
+                </div>`;
+            }
+            
+            // Final verdict
+            testResults.innerHTML += `<div class="mt-2 pt-2 border-t font-bold ${allGood ? 'text-green-600' : 'text-red-600'}">
+                ${allGood ? '✓ ALL SYSTEMS GO!' : '✗ Some functions missing'}
+            </div>`;
+        });
+    </script>
+</body>
+</html>

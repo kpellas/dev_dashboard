@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Session Closure & Verification</title>
+    <link href="https://cdn.tailwindcss.com" rel="stylesheet">
+</head>
+<body class="p-8 bg-gray-50">
+    <h1 class="text-2xl font-bold mb-6">🔍 Test Session Closure & Verification</h1>
+    
+    <div class="grid grid-cols-2 gap-6">
+        <!-- Test Controls -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h2 class="text-lg font-semibold mb-4">Test Controls</h2>
+            
+            <div class="space-y-3">
+                <button onclick="createTestSession()" 
+                    class="w-full px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                    1. Create Test Session
+                </button>
+                
+                <button onclick="simulateWork()" 
+                    class="w-full px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                    2. Simulate Work
+                </button>
+                
+                <div class="border-t pt-3">
+                    <p class="text-sm font-medium mb-2">3. Close Session As:</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="closeSession('stop')" 
+                            class="px-3 py-2 bg-gray-500 text-white rounded text-sm hover:bg-gray-600">
+                            🛑 Stop
+                        </button>
+                        <button onclick="closeSession('wip')" 
+                            class="px-3 py-2 bg-orange-500 text-white rounded text-sm hover:bg-orange-600">
+                            🔄 WIP
+                        </button>
+                        <button onclick="closeSession('complete')" 
+                            class="px-3 py-2 bg-green-500 text-white rounded text-sm hover:bg-green-600">
+                            ✅ Complete
+                        </button>
+                        <button onclick="closeSession('abandon')" 
+                            class="px-3 py-2 bg-red-500 text-white rounded text-sm hover:bg-red-600">
+                            ❌ Abandon
+                        </button>
+                    </div>
+                </div>
+                
+                <button onclick="checkPorts()" 
+                    class="w-full px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600">
+                    Check Port Status
+                </button>
+                
+                <button onclick="runVerification()" 
+                    class="w-full px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600">
+                    Run Cleanup Verification
+                </button>
+            </div>
+        </div>
+        
+        <!-- Status Display -->
+        <div class="bg-white rounded-lg shadow p-4">
+            <h2 class="text-lg font-semibold mb-4">Session Status</h2>
+            <div id="sessionStatus" class="space-y-2 text-sm">
+                <p class="text-gray-500">No session created yet</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Sessions List -->
+    <div id="sessionsList" class="mt-6"></div>
+    
+    <!-- Log -->
+    <div class="mt-6 bg-white rounded-lg shadow p-4">
+        <h2 class="text-lg font-semibold mb-4">Activity Log</h2>
+        <div id="log" class="space-y-1 text-xs font-mono max-h-64 overflow-y-auto"></div>
+    </div>
+    
+    <script>
+        // Mock globals
+        window.sessions = [];
+        window.activeProject = 'test-project';
+        window.projects = {
+            'test-project': {
+                name: 'Test Project',
+                path: '/test/project'
+            }
+        };
+        window.ideas = {
+            items: [
+                {id: '1', title: 'Fix bug', sprint: 'Sprint-1', status: 'done', priority: 'high'},
+                {id: '2', title: 'Add feature', sprint: 'Sprint-1', status: 'in_progress', priority: 'medium'},
+                {id: '3', title: 'Update docs', sprint: 'Sprint-1', status: 'new', priority: 'low'}
+            ]
+        };
+        window.expandedSessionId = null;
+        
+        let currentSession = null;
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const color = type === 'error' ? 'text-red-600' : 
+                         type === 'success' ? 'text-green-600' :
+                         type === 'warning' ? 'text-orange-600' : '';
+            logDiv.innerHTML = `<div class="${color}">[${time}] ${message}</div>` + logDiv.innerHTML;
+        }
+        
+        function createTestSession() {
+            const sessionId = `TEST-${Date.now()}`;
+            currentSession = {
+                sessionId: sessionId,
+                projectId: 'test-project',
+                sprintName: 'Sprint-1',
+                sprint: 'Sprint-1',
+                worktreeName: 'feature-test',
+                worktree: 'feature-test',
+                items: 3,
+                status: 'ready',
+                state: 'planned',
+                created: new Date().toISOString(),
+                frontendPort: 5173,
+                backendPort: 3001,
+                workingPath: '/test/project/worktrees/feature-test'
+            };
+            
+            window.sessions.push(currentSession);
+            log(`Created session: ${sessionId}`, 'success');
+            updateStatus();
+            renderSessions();
+        }
+        
+        function simulateWork() {
+            if (!currentSession) {
+                log('No session to work on!', 'error');
+                return;
+            }
+            
+            currentSession.state = 'in_progress';
+            currentSession.startedAt = new Date().toISOString();
+            
+            // Simulate completing an item
+            const item = window.ideas.items.find(i => i.status === 'new');
+            if (item) {
+                item.status = 'done';
+                log(`Completed item: ${item.title}`, 'success');
+            }
+            
+            updateStatus();
+            renderSessions();
+        }
+        
+        function closeSession(outcome) {
+            if (!currentSession) {
+                log('No session to close!', 'error');
+                return;
+            }
+            
+            log(`Closing session as: ${outcome}`, 'warning');
+            
+            // This will trigger the generateCloseScript function
+            if (window.generateCloseScript) {
+                window.generateCloseScript(currentSession.sessionId, outcome);
+            }
+            
+            updateStatus();
+            renderSessions();
+        }
+        
+        async function checkPorts() {
+            const ports = [5173, 3001];
+            for (const port of ports) {
+                try {
+                    const response = await fetch(`/api/check-port/${port}`);
+                    const data = await response.json();
+                    log(`Port ${port}: ${data.inUse ? '❌ IN USE' : '✅ FREE'} (${data.processCount} processes)`, 
+                        data.inUse ? 'warning' : 'success');
+                } catch (error) {
+                    log(`Failed to check port ${port}: ${error.message}`, 'error');
+                }
+            }
+        }
+        
+        async function runVerification() {
+            if (window.runCleanupVerification) {
+                await window.runCleanupVerification();
+                log('Cleanup verification started', 'info');
+            } else {
+                log('Verification not available', 'error');
+            }
+        }
+        
+        function updateStatus() {
+            const statusDiv = document.getElementById('sessionStatus');
+            if (!currentSession) {
+                statusDiv.innerHTML = '<p class="text-gray-500">No session created yet</p>';
+                return;
+            }
+            
+            const items = window.ideas.items.filter(i => i.sprint === 'Sprint-1');
+            const completed = items.filter(i => i.status === 'done').length;
+            const inProgress = items.filter(i => i.status === 'in_progress').length;
+            const notStarted = items.filter(i => i.status === 'new').length;
+            
+            statusDiv.innerHTML = `
+                <div class="space-y-2">
+                    <div><strong>Session:</strong> ${currentSession.sessionId}</div>
+                    <div><strong>State:</strong> <span class="px-2 py-1 bg-blue-100 rounded text-xs">${currentSession.state}</span></div>
+                    <div><strong>Sprint:</strong> ${currentSession.sprintName}</div>
+                    <div><strong>Worktree:</strong> ${currentSession.worktreeName}</div>
+                    <div><strong>Ports:</strong> Frontend ${currentSession.frontendPort}, Backend ${currentSession.backendPort}</div>
+                    <div class="border-t pt-2">
+                        <div>✅ Completed: ${completed}</div>
+                        <div>⚡ In Progress: ${inProgress}</div>
+                        <div>□ Not Started: ${notStarted}</div>
+                    </div>
+                    ${currentSession.closureType ? `
+                        <div class="border-t pt-2">
+                            <strong>Closed as:</strong> 
+                            <span class="px-2 py-1 bg-gray-100 rounded text-xs">${currentSession.closureType}</span>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+        
+        function renderSessions() {
+            const container = document.getElementById('sessionsList');
+            if (window.renderEnhancedSessionCardWithTabs) {
+                container.innerHTML = window.sessions.map(s => 
+                    window.renderEnhancedSessionCardWithTabs(s)
+                ).join('');
+            } else {
+                container.innerHTML = '<p class="text-gray-500 text-sm">Enhanced session cards not loaded</p>';
+            }
+        }
+        
+        // Mock renderSessionsTab
+        window.renderSessionsTab = renderSessions;
+    </script>
+    
+    <!-- Load the actual session scripts -->
+    <script src="session-management.js"></script>
+    <script src="session-enhanced.js"></script>
+    <script src="session-verification.js"></script>
+    <script src="session-auto-verify.js"></script>
+    <script src="dashboard-improvements.js"></script>
+    
+    <script>
+        // Initialize after scripts load
+        window.addEventListener('load', () => {
+            log('Test page loaded', 'success');
+            log('Enhanced cards available: ' + (typeof window.renderEnhancedSessionCardWithTabs === 'function'));
+            log('Verification available: ' + (typeof window.runCleanupVerification === 'function'));
+            log('Post-session summary available: ' + (typeof window.showPostSessionSummary === 'function'));
+        });
+    </script>
+</body>
+</html>

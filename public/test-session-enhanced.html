@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Enhanced Sessions</title>
+    <link href="https://cdn.tailwindcss.com" rel="stylesheet">
+    <script src="session-management.js"></script>
+</head>
+<body class="p-8">
+    <h1 class="text-2xl font-bold mb-4">Testing Enhanced Session Cards</h1>
+    <div id="sessionsList"></div>
+    
+    <script>
+        // Mock global variables
+        window.sessions = [
+            {
+                sessionId: "20250809-Test-feature",
+                projectId: "test",
+                projectName: "Test Project",
+                sprintName: "Test Sprint",
+                worktreeName: "test-worktree",
+                items: [{id: "1", title: "Test Item", status: "new"}],
+                status: "ready",
+                state: "planned",
+                created: new Date().toISOString()
+            }
+        ];
+        window.activeProject = "test";
+        window.projects = {};
+        window.worktrees = [];
+        window.ideas = {};
+        
+        // Wait for script to load
+        setTimeout(() => {
+            console.log('renderEnhancedSessionCard type:', typeof renderEnhancedSessionCard);
+            
+            if (typeof renderEnhancedSessionCard === 'function') {
+                const card = renderEnhancedSessionCard(sessions[0]);
+                document.getElementById('sessionsList').innerHTML = card;
+                console.log('Card rendered successfully');
+            } else {
+                document.getElementById('sessionsList').innerHTML = 
+                    '<p class="text-red-500">renderEnhancedSessionCard is not available</p>';
+            }
+        }, 100);
+    </script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Session Expand</title>
+    <link href="https://cdn.tailwindcss.com" rel="stylesheet">
+</head>
+<body class="p-8">
+    <h1 class="text-2xl font-bold mb-4">Test Session Expand</h1>
+    
+    <div class="mb-4 p-4 bg-gray-100 rounded">
+        <p>Click on the session card below to expand/collapse:</p>
+        <p class="text-sm text-gray-600 mt-2">Current expandedSessionId: <span id="currentExpanded" class="font-mono">null</span></p>
+    </div>
+    
+    <div id="sessionsList"></div>
+    
+    <script>
+        // Setup globals
+        window.sessions = [{
+            sessionId: "TEST-123",
+            projectId: "test",
+            sprint: "Test Sprint",
+            worktree: "test-branch",
+            items: 2,
+            status: "ready",
+            created: new Date().toISOString()
+        }];
+        window.activeProject = "test";
+        window.projects = {};
+        window.worktrees = [];
+        window.ideas = {};
+    </script>
+    
+    <script src="session-management.js"></script>
+    <script src="dashboard-improvements.js"></script>
+    
+    <script>
+        window.addEventListener('load', () => {
+            console.log('expandedSessionId initial:', window.expandedSessionId);
+            
+            // Override toggleSessionExpand to add logging
+            const originalToggle = window.toggleSessionExpand;
+            window.toggleSessionExpand = function(sessionId) {
+                console.log('toggleSessionExpand called with:', sessionId);
+                console.log('expandedSessionId before:', window.expandedSessionId);
+                
+                // Call original function
+                if (originalToggle) {
+                    originalToggle(sessionId);
+                }
+                
+                console.log('expandedSessionId after:', window.expandedSessionId);
+                document.getElementById('currentExpanded').textContent = window.expandedSessionId || 'null';
+            };
+            
+            // Render sessions
+            if (typeof window.renderSessionsTab === 'function') {
+                window.renderSessionsTab();
+                console.log('Sessions rendered');
+                
+                // Check what was rendered
+                const html = document.getElementById('sessionsList').innerHTML;
+                console.log('Contains onclick?', html.includes('onclick'));
+                console.log('Contains toggleSessionExpand?', html.includes('toggleSessionExpand'));
+            }
+        });
+    </script>
+</body>
+</html>

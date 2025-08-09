@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check Loading Order</title>
+</head>
+<body>
+    <h1>Check Script Loading Order</h1>
+    <div id="log"></div>
+    
+    <script>
+        const log = (msg) => {
+            document.getElementById('log').innerHTML += msg + '<br>';
+        };
+        log('1. Inline script starting');
+    </script>
+    
+    <script src="dashboard-improvements.js"></script>
+    <script>log('2. After dashboard-improvements.js');</script>
+    
+    <script src="session-management.js"></script>
+    <script>log('3. After session-management.js');</script>
+    
+    <script>
+        log('4. renderEnhancedSessionCard: ' + typeof window.renderEnhancedSessionCard);
+        log('5. renderSessionsTab: ' + typeof window.renderSessionsTab);
+    </script>
+</body>
+</html>

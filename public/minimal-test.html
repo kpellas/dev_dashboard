@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minimal Test</title>
+</head>
+<body>
+    <h1>Minimal Function Test</h1>
+    <pre id="log"></pre>
+    
+    <script>
+        // Create minimal globals that session-management.js expects
+        window.sessions = [];
+        window.activeProject = null;
+        window.projects = {};
+        window.worktrees = [];
+        window.ideas = {};
+        
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            document.getElementById('log').textContent += 
+                'ERROR: ' + msg + '\nLine: ' + lineNo + '\n\n';
+            return false;
+        };
+    </script>
+    
+    <script src="session-management.js"></script>
+    
+    <script>
+        const log = document.getElementById('log');
+        log.textContent += 'Script loaded\n';
+        log.textContent += 'renderEnhancedSessionCard type: ' + typeof window.renderEnhancedSessionCard + '\n';
+        log.textContent += 'SESSION_STATES type: ' + typeof window.SESSION_STATES + '\n';
+        
+        if (typeof window.renderEnhancedSessionCard === 'function') {
+            log.textContent += '\nSUCCESS: Function is available!\n';
+        } else {
+            log.textContent += '\nERROR: Function not found\n';
+        }
+    </script>
+</body>
+</html>
