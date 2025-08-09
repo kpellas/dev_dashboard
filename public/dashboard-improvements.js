@@ -8,7 +8,7 @@ let expandedSprintId = null;
 // expandedSessionId is already declared in session-management.js
 
 function renderIdeasTab() {
-    const items = ideas.items?.filter(item => 
+    const items = window.ideas.items?.filter(item => 
         item.status !== 'done' && item.status !== 'archived'
     ) || [];
     
@@ -54,7 +54,7 @@ function renderIdeasTab() {
                         <div class="flex gap-2">
                             <select id="edit-sprint-${item.id}" class="flex-1 px-2 py-1 text-sm border rounded">
                                 <option value="">No Sprint (Backlog)</option>
-                                ${Object.keys(ideas.sprints || {}).map(name => 
+                                ${Object.keys(window.ideas.sprints || {}).map(name => 
                                     `<option value="${name}" ${item.sprint === name ? 'selected' : ''}>${name}</option>`
                                 ).join('')}
                             </select>
@@ -127,11 +127,11 @@ function renderIdeasTab() {
                         ${item.comments && item.comments.length > 0 ? `
                             <div class="mt-3 pt-3 border-t">
                                 <div class="text-xs font-medium text-gray-600 mb-1">Comments (${item.comments.length})</div>
-                                <div class="space-y-1 max-h-20 overflow-y-auto">
-                                    ${item.comments.slice(-2).map(c => `
-                                        <div class="text-xs bg-gray-50 p-1 rounded">
+                                <div class="space-y-2 max-h-40 overflow-y-auto bg-gray-50 p-2 rounded">
+                                    ${item.comments.map(c => `
+                                        <div class="text-xs bg-white p-2 rounded border">
                                             <span class="text-gray-500">${new Date(c.timestamp).toLocaleString()}</span>
-                                            <div>${c.text}</div>
+                                            <div class="mt-1 text-gray-800 break-words">${c.text}</div>
                                         </div>
                                     `).join('')}
                                 </div>
@@ -159,7 +159,7 @@ function renderIdeasTab() {
                             class="px-2 py-1 text-xs border rounded bg-white hover:bg-gray-50">
                             <option value="">Move to Sprint...</option>
                             <option value="backlog">Backlog</option>
-                            ${Object.keys(ideas.sprints || {}).map(name => 
+                            ${Object.keys(window.ideas.sprints || {}).map(name => 
                                 `<option value="${name}">${name}</option>`
                             ).join('')}
                             <option value="__new__">+ Create New Sprint</option>
@@ -182,8 +182,14 @@ function cancelEdit() {
 }
 
 async function saveItemChanges(itemId) {
-    const item = ideas.items.find(i => i.id === itemId);
+    const item = window.ideas.items.find(i => i.id === itemId);
     if (!item) return;
+    
+    // Check if activeProject is defined
+    if (!window.activeProject) {
+        alert('No active project selected. Please select a project first.');
+        return;
+    }
     
     // Get all edited values
     const newType = document.getElementById(`edit-type-${itemId}`).value;
@@ -211,10 +217,10 @@ async function saveItemChanges(itemId) {
     
     // Save to server
     try {
-        await fetch(`/api/projects/${activeProject}/ideas`, {
+        await fetch(`/api/projects/${window.activeProject}/ideas`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ideas)
+            body: JSON.stringify(window.ideas)
         });
         
         editingItemId = null;
@@ -227,13 +233,46 @@ async function saveItemChanges(itemId) {
 }
 
 async function addComment(itemId) {
-    const item = ideas.items.find(i => i.id === itemId);
-    if (!item) return;
+    console.log('addComment called with itemId:', itemId, 'type:', typeof itemId);
+    console.log('window.ideas.items:', window.ideas.items);
+    console.log('window.activeProject:', window.activeProject);
+    
+    // Convert itemId to match the type used in the data
+    // If the ID in data is a number, convert string to number
+    const item = window.ideas.items.find(i => {
+        console.log('Comparing:', i.id, '(type:', typeof i.id, ') with', itemId, '(type:', typeof itemId, ')');
+        // Compare both as strings and as numbers to handle both cases
+        return i.id == itemId || i.id === itemId || i.id === parseInt(itemId) || String(i.id) === String(itemId);
+    });
+    
+    console.log('Found item:', item);
+    if (!item) {
+        console.error('Item not found for ID:', itemId);
+        alert('Error: Could not find item with ID ' + itemId);
+        return;
+    }
     
     const commentInput = document.getElementById(`comment-${itemId}`);
-    const commentText = commentInput.value.trim();
+    console.log('Comment input element:', commentInput);
+    if (!commentInput) {
+        console.error('Comment input not found for ID:', `comment-${itemId}`);
+        alert('Error: Comment input field not found');
+        return;
+    }
     
-    if (!commentText) return;
+    const commentText = commentInput.value.trim();
+    console.log('Comment text:', commentText);
+    
+    if (!commentText) {
+        console.log('No comment text entered');
+        return;
+    }
+    
+    // Check if activeProject is defined
+    if (!window.activeProject) {
+        alert('No active project selected. Please select a project first.');
+        return;
+    }
     
     // Initialize comments array if it doesn't exist
     if (!item.comments) {
@@ -251,18 +290,49 @@ async function addComment(itemId) {
     item.updated = new Date().toISOString();
     
     // Save to server
+    console.log('Saving to server...');
+    console.log('API URL:', `/api/projects/${window.activeProject}/ideas`);
+    console.log('Data being sent:', window.ideas);
+    
     try {
-        const res = await fetch(`/api/projects/${activeProject}/ideas`, {
+        const res = await fetch(`/api/projects/${window.activeProject}/ideas`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ideas)
+            body: JSON.stringify(window.ideas)
         });
         
+        console.log('Server response status:', res.status, res.ok);
+        
         if (res.ok) {
+            console.log('Comment saved successfully');
             commentInput.value = '';
-            renderIdeasTab();
+            
+            // Reload ideas from server to get the updated data
+            console.log('Reloading ideas from server...');
+            try {
+                const ideasRes = await fetch(`/api/projects/${window.activeProject}/ideas`);
+                if (ideasRes.ok) {
+                    window.ideas = await ideasRes.json();
+                    console.log('Ideas reloaded successfully:', window.ideas);
+                    renderIdeasTab();
+                } else {
+                    console.error('Failed to reload ideas');
+                    // Still try to render with existing data
+                    renderIdeasTab();
+                }
+            } catch (reloadError) {
+                console.error('Error reloading ideas:', reloadError);
+                // Still try to render with existing data
+                renderIdeasTab();
+            }
+        } else {
+            console.error('Server returned error:', res.status);
+            const errorText = await res.text();
+            console.error('Error details:', errorText);
+            alert('Server error: ' + res.status);
         }
     } catch (error) {
+        console.error('Failed to add comment:', error);
         alert('Failed to add comment: ' + error.message);
     }
 }
@@ -270,8 +340,15 @@ async function addComment(itemId) {
 async function handleSprintMove(itemId, sprintValue) {
     if (!sprintValue) return;
     
-    const item = ideas.items.find(i => i.id === itemId);
+    const item = window.ideas.items.find(i => i.id === itemId);
     if (!item) return;
+    
+    // Check if activeProject is defined
+    if (!window.activeProject) {
+        alert('No active project selected. Please select a project first.');
+        renderIdeasTab(); // Reset dropdown
+        return;
+    }
     
     if (sprintValue === '__new__') {
         // Show create sprint modal
@@ -281,16 +358,16 @@ async function handleSprintMove(itemId, sprintValue) {
             return;
         }
         
-        if (!ideas.sprints) ideas.sprints = {};
+        if (!window.ideas.sprints) window.ideas.sprints = {};
         
-        if (ideas.sprints[sprintName]) {
+        if (window.ideas.sprints[sprintName]) {
             alert('A sprint with this name already exists');
             renderIdeasTab();
             return;
         }
         
         // Create the new sprint
-        ideas.sprints[sprintName] = {
+        window.ideas.sprints[sprintName] = {
             name: sprintName,
             description: '',
             start: new Date().toISOString().split('T')[0],
@@ -311,10 +388,10 @@ async function handleSprintMove(itemId, sprintValue) {
     
     // Save changes
     try {
-        await fetch(`/api/projects/${activeProject}/ideas`, {
+        await fetch(`/api/projects/${window.activeProject}/ideas`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ideas)
+            body: JSON.stringify(window.ideas)
         });
         
         renderIdeasTab();
@@ -327,13 +404,13 @@ async function handleSprintMove(itemId, sprintValue) {
 
 // Sprints tab functionality
 function renderSprintsTab() {
-    if (!ideas.sprints) {
+    if (!window.ideas.sprints) {
         document.getElementById('sprintsList').innerHTML = '<p class="text-gray-500">No sprints yet</p>';
         return;
     }
     
-    document.getElementById('sprintsList').innerHTML = Object.entries(ideas.sprints).map(([name, sprint]) => {
-        const items = ideas.items?.filter(i => i.sprint === name) || [];
+    document.getElementById('sprintsList').innerHTML = Object.entries(window.ideas.sprints).map(([name, sprint]) => {
+        const items = window.ideas.items?.filter(i => i.sprint === name) || [];
         const todoItems = items.filter(i => i.status !== 'done');
         const doneItems = items.filter(i => i.status === 'done');
         const assignment = sprintAssignments[name];
@@ -479,7 +556,7 @@ function cancelSprintEdit() {
 }
 
 async function saveSprintChanges(oldName) {
-    const sprint = ideas.sprints[oldName];
+    const sprint = window.ideas.sprints[oldName];
     if (!sprint) return;
     
     const newName = document.getElementById(`edit-sprint-name-${oldName}`).value.trim();
@@ -496,11 +573,11 @@ async function saveSprintChanges(oldName) {
     
     // If name changed, update the sprint key
     if (newName !== oldName) {
-        ideas.sprints[newName] = sprint;
-        delete ideas.sprints[oldName];
+        window.ideas.sprints[newName] = sprint;
+        delete window.ideas.sprints[oldName];
         
         // Update all items that reference this sprint
-        ideas.items?.forEach(item => {
+        window.ideas.items?.forEach(item => {
             if (item.sprint === oldName) {
                 item.sprint = newName;
             }
@@ -510,7 +587,7 @@ async function saveSprintChanges(oldName) {
         if (sprintAssignments[oldName]) {
             sprintAssignments[newName] = sprintAssignments[oldName];
             delete sprintAssignments[oldName];
-            localStorage.setItem(`sprint-assignments-${activeProject}`, JSON.stringify(sprintAssignments));
+            localStorage.setItem(`sprint-assignments-${window.activeProject}`, JSON.stringify(sprintAssignments));
         }
     }
     
@@ -523,10 +600,10 @@ async function saveSprintChanges(oldName) {
     sprint.updated = new Date().toISOString();
     
     try {
-        await fetch(`/api/projects/${activeProject}/ideas`, {
+        await fetch(`/api/projects/${window.activeProject}/ideas`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ideas)
+            body: JSON.stringify(window.ideas)
         });
         
         editingSprintId = null;
@@ -544,7 +621,7 @@ async function deleteSprint(sprintName) {
     }
     
     // Move all items in this sprint to backlog
-    ideas.items?.forEach(item => {
+    window.ideas.items?.forEach(item => {
         if (item.sprint === sprintName) {
             item.sprint = null;
             item.updated = new Date().toISOString();
@@ -552,19 +629,19 @@ async function deleteSprint(sprintName) {
     });
     
     // Delete the sprint
-    delete ideas.sprints[sprintName];
+    delete window.ideas.sprints[sprintName];
     
     // Remove sprint assignments
     if (sprintAssignments[sprintName]) {
         delete sprintAssignments[sprintName];
-        localStorage.setItem(`sprint-assignments-${activeProject}`, JSON.stringify(sprintAssignments));
+        localStorage.setItem(`sprint-assignments-${window.activeProject}`, JSON.stringify(sprintAssignments));
     }
     
     try {
-        await fetch(`/api/projects/${activeProject}/ideas`, {
+        await fetch(`/api/projects/${window.activeProject}/ideas`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(ideas)
+            body: JSON.stringify(window.ideas)
         });
         
         editingSprintId = null;
@@ -802,7 +879,7 @@ async function saveWorktreeChanges(worktreeName) {
     
     try {
         // Save config to worktree directory
-        const project = projects[activeProject];
+        const project = projects[window.activeProject];
         if (project) {
             await fetch('/api/worktree-config', {
                 method: 'POST',
@@ -827,7 +904,7 @@ async function saveWorktreeChanges(worktreeName) {
 
 // Sessions tab functionality - use enhanced version with tabs
 function renderSessionsTab() {
-    const projectSessions = sessions.filter(s => s.projectId === activeProject);
+    const projectSessions = sessions.filter(s => s.projectId === window.activeProject);
     
     // PRIMARY: Use renderEnhancedSessionCardWithTabs from session-enhanced.js
     // This has the tabs (Overview/Start/Complete) and full session management
@@ -1010,7 +1087,7 @@ async function archiveWorktree(worktreeName) {
     }
     
     try {
-        const url = new URL(`/api/projects/${activeProject}/worktrees/${worktreeName}`, window.location.origin);
+        const url = new URL(`/api/projects/${window.activeProject}/worktrees/${worktreeName}`, window.location.origin);
         if (worktree.gitStatus?.hasChanges) {
             url.searchParams.append('force', 'true');
         }
@@ -1023,7 +1100,7 @@ async function archiveWorktree(worktreeName) {
             alert(`Worktree "${worktreeName}" has been archived successfully.`);
             
             // Reload worktrees
-            await loadProjectData(activeProject);
+            await loadProjectData(window.activeProject);
             renderWorktreesTab();
         } else {
             const error = await response.json();
@@ -1071,7 +1148,7 @@ async function startServer(worktreeName, serverType, port) {
             
             // Reload worktrees after a delay to show updated status
             setTimeout(async () => {
-                await loadProjectData(activeProject);
+                await loadProjectData(window.activeProject);
                 renderWorktreesTab();
             }, 3000);
         } else {
@@ -1103,7 +1180,7 @@ async function stopServer(worktreeName, serverType, port) {
             alert(`${serverType} server on port ${port} has been stopped.`);
             
             // Reload worktrees to update port status
-            await loadProjectData(activeProject);
+            await loadProjectData(window.activeProject);
             renderWorktreesTab();
         } else {
             alert(`Failed to stop ${serverType} server: ${killData.error || 'Unknown error'}`);

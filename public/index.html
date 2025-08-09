@@ -237,13 +237,14 @@
     </div>
 
     <script>
-        let projects = {};
-        let activeProject = null;
-        let sessions = [];
-        let ideas = {};
-        let worktrees = [];
-        let sprintAssignments = {};
-        let branches = [];
+        // Make these global so they can be accessed by other scripts
+        window.projects = {};
+        window.activeProject = null;
+        window.sessions = [];
+        window.ideas = {};
+        window.worktrees = [];
+        window.sprintAssignments = {};
+        window.branches = [];
         let currentTab = 'overview'; // Track which sprints are assigned to which worktrees
 
         // Helper function to get relative time
@@ -280,8 +281,8 @@
                 // Load projects
                 const projectsRes = await fetch('/api/projects');
                 const projectsData = await projectsRes.json();
-                projects = projectsData.projects;
-                activeProject = projectsData.activeProject;
+                window.projects = projectsData.projects;
+                window.activeProject = projectsData.activeProject;
                 
                 // Update project selector
                 const selector = document.getElementById('projectSelector');
@@ -293,15 +294,15 @@
                 
                 // Load sessions
                 const sessionsRes = await fetch('/api/sessions');
-                sessions = await sessionsRes.json();
+                window.sessions = await sessionsRes.json();
                 
                 // Update session count
-                const activeCount = sessions.filter(s => s.status === 'ready' || s.status === 'active').length;
+                const activeCount = window.sessions.filter(s => s.status === 'ready' || s.status === 'active').length;
                 document.getElementById('sessionCount').textContent = `${activeCount} active sessions`;
                 
                 // Load current project data
-                if (activeProject) {
-                    await loadProjectData(activeProject);
+                if (window.activeProject) {
+                    await loadProjectData(window.activeProject);
                 }
                 
                 // Update all views
@@ -322,16 +323,16 @@
             try {
                 // Load ideas/sprints
                 const ideasRes = await fetch(`/api/projects/${projectId}/ideas`);
-                ideas = await ideasRes.json();
+                window.ideas = await ideasRes.json();
                 
                 // Load worktrees with server status
                 const worktreesRes = await fetch(`/api/projects/${projectId}/worktrees`);
-                worktrees = await worktreesRes.json();
+                window.worktrees = await worktreesRes.json();
                 console.log('Loaded worktrees:', worktrees);
                 
                 // Load sprint assignments from localStorage (or could be from server)
                 const stored = localStorage.getItem(`sprint-assignments-${projectId}`);
-                sprintAssignments = stored ? JSON.parse(stored) : {};
+                window.sprintAssignments = stored ? JSON.parse(stored) : {};
                 
             } catch (error) {
                 console.error('Error loading project data:', error);
@@ -339,7 +340,7 @@
         }
 
         function updateOverview() {
-            const project = projects[activeProject];
+            const project = window.projects[window.activeProject];
             if (!project) return;
             
             // Update project info
@@ -356,7 +357,7 @@
             `;
             
             // Update stats
-            const allItems = ideas.items || [];
+            const allItems = window.ideas.items || [];
             const backlogItems = allItems.filter(i => !i.sprint || i.sprint === 'backlog');
             const sprints = Object.keys(ideas.sprints || {});
             const activeSprints = sprints.filter(s => ideas.sprints[s].status === 'active');
@@ -403,8 +404,8 @@
             `;
             
             // Update active sessions
-            const activeSessions = sessions.filter(s => 
-                s.projectId === activeProject && (s.status === 'ready' || s.status === 'active')
+            const activeSessions = window.sessions.filter(s => 
+                s.projectId === window.activeProject && (s.status === 'ready' || s.status === 'active')
             );
             
             document.getElementById('activeSessions').innerHTML = activeSessions.length > 0 
@@ -435,7 +436,7 @@
             }
             
             // Fallback rendering (shouldn't normally be reached)
-            const allItems = ideas.items || [];
+            const allItems = window.ideas.items || [];
             document.getElementById('ideasList').innerHTML = allItems.length > 0 
                 ? allItems.map(item => `
                     <div class="border rounded-lg p-3">
@@ -460,7 +461,7 @@
             }
             
             document.getElementById('sprintsList').innerHTML = Object.entries(ideas.sprints).map(([name, sprint]) => {
-                const items = ideas.items?.filter(i => i.sprint === name) || [];
+                const items = window.ideas.items?.filter(i => i.sprint === name) || [];
                 const todoItems = items.filter(i => i.status !== 'done');
                 const assignment = sprintAssignments[name];
                 
@@ -567,7 +568,7 @@
             }
             
             // Fallback
-            const projectSessions = sessions.filter(s => s.projectId === activeProject);
+            const projectSessions = window.sessions.filter(s => s.projectId === window.activeProject);
             
             document.getElementById('sessionsList').innerHTML = projectSessions.length > 0
                 ? projectSessions.map(session => `
@@ -634,7 +635,7 @@
         }
         
         async function refreshBranches() {
-            if (!activeProject) {
+            if (!window.activeProject) {
                 document.getElementById('branchesList').innerHTML = '<p class="text-gray-500">Please select a project first</p>';
                 return;
             }
@@ -643,7 +644,7 @@
             
             try {
                 const res = await fetch(`/api/projects/${activeProject}/branches`);
-                branches = await res.json();
+                window.branches = await res.json();
                 updateBranches();
             } catch (error) {
                 document.getElementById('branchesList').innerHTML = 
@@ -882,13 +883,13 @@
         // Project selector change
         document.getElementById('projectSelector').addEventListener('change', async (e) => {
             const projectId = e.target.value;
-            if (projectId && projectId !== activeProject) {
+            if (projectId && projectId !== window.activeProject) {
                 await fetch('/api/projects/select', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ projectId })
                 });
-                activeProject = projectId;
+                window.activeProject = projectId;
                 await loadData();
             }
         });
@@ -898,7 +899,7 @@
         // Removed editItem - now handled by clicking on the card
         
         function editItemOld(itemId) {
-            const item = ideas.items.find(i => i.id === itemId);
+            const item = window.ideas.items.find(i => i.id === itemId);
             if (!item) return;
             
             showModal(`
@@ -948,7 +949,7 @@
         }
 
         function saveItemEdit(itemId) {
-            const item = ideas.items.find(i => i.id === itemId);
+            const item = window.ideas.items.find(i => i.id === itemId);
             if (!item) return;
             
             item.title = document.getElementById('editTitle').value;
@@ -1094,7 +1095,7 @@
                     if (!response.ok) throw new Error('Failed to create worktree');
                     
                     // Reload worktrees
-                    await loadProjectData(activeProject);
+                    await loadProjectData(window.activeProject);
                 } catch (error) {
                     alert('Failed to create worktree: ' + error.message);
                     return;
@@ -1239,7 +1240,7 @@
         }
 
         function showCreateIdea() {
-            if (!activeProject) {
+            if (!window.activeProject) {
                 alert('Please select a project first');
                 return;
             }
@@ -1308,11 +1309,11 @@
                 return;
             }
             
-            if (!ideas.items) ideas.items = [];
+            if (!window.ideas.items) window.ideas.items = [];
             
             // Generate ID
             const typePrefix = type === 'bug' ? 'bug' : type === 'feature' ? 'feature' : type === 'task' ? 'task' : 'idea';
-            const nextNum = ideas.items.filter(i => i.id?.startsWith(typePrefix)).length + 1;
+            const nextNum = window.ideas.items.filter(i => i.id?.startsWith(typePrefix)).length + 1;
             const id = `${typePrefix}-${String(nextNum).padStart(3, '0')}`;
             
             const newItem = {
@@ -1327,7 +1328,7 @@
                 updated: new Date().toISOString()
             };
             
-            ideas.items.push(newItem);
+            window.ideas.items.push(newItem);
             
             try {
                 await fetch(`/api/projects/${activeProject}/ideas`, {
@@ -1347,7 +1348,7 @@
         }
 
         function showCreateSprint() {
-            if (!activeProject) {
+            if (!window.activeProject) {
                 alert('Please select a project first');
                 return;
             }
@@ -1447,7 +1448,7 @@ Improve performance"></textarea>
         }
 
         function showCreateWorktree() {
-            if (!activeProject) {
+            if (!window.activeProject) {
                 alert('Please select a project first');
                 return;
             }
@@ -1499,7 +1500,7 @@ Improve performance"></textarea>
                 const data = await res.json();
                 if (data.success) {
                     hideModal();
-                    await loadProjectData(activeProject);
+                    await loadProjectData(window.activeProject);
                     updateWorktrees();
                     alert(`Worktree created! Frontend: ${data.worktree.frontendPort}, Backend: ${data.worktree.backendPort}`);
                     
@@ -1522,7 +1523,7 @@ Improve performance"></textarea>
         }
 
         function moveToSprint(itemId, sprintName) {
-            const item = ideas.items.find(i => i.id === itemId);
+            const item = window.ideas.items.find(i => i.id === itemId);
             if (!item) return;
             
             if (!sprintName) {
