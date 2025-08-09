@@ -2,6 +2,88 @@
 // THIS IS THE PRIMARY SESSION CARD RENDERER USED BY THE DASHBOARD
 // It provides tabs for Overview/Start/Complete and full session management
 
+// Shared function to generate session setup script
+function generateSessionSetupScript(session) {
+    const sprintName = session.sprintName || session.sprint;
+    const worktreeName = session.worktreeName || session.worktree;
+    const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
+    const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
+    
+    const sprintItems = ideas?.items?.filter(item => 
+        item.sprint === sprintName
+    ) || [];
+    
+    return `#!/bin/bash
+# Quick Sprint Session Setup - ${sprintName}
+
+# CONFIGURATION
+PROJECT_PATH="/Users/kellypellas/DevProjects/${activeProject}"
+WORKTREE_NAME="${worktreeName}"
+WORKTREE_PATH="$PROJECT_PATH/worktrees/$WORKTREE_NAME"
+BRANCH="${worktreeName}"
+FRONTEND_PORT=${frontendPort}
+BACKEND_PORT=${backendPort}
+
+echo "🚀 Starting Sprint: ${sprintName}"
+echo "📁 Project: ${activeProject}"
+echo "🌳 Worktree: $WORKTREE_NAME"
+
+# Create worktree if it doesn't exist
+if [ ! -d "$WORKTREE_PATH" ]; then
+    echo "Creating worktree..."
+    cd "$PROJECT_PATH" || exit 1
+    git worktree add "worktrees/$WORKTREE_NAME" -b "$BRANCH" || {
+        # If branch exists, just check it out
+        git worktree add "worktrees/$WORKTREE_NAME" "$BRANCH"
+    }
+fi
+
+# Navigate to worktree
+cd "$WORKTREE_PATH" || exit 1
+
+# Install dependencies if needed
+[[ ! -d "node_modules" ]] && npm install
+
+# Setup git branch
+git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
+
+# Clear ports
+lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null
+lsof -ti:$BACKEND_PORT | xargs kill -9 2>/dev/null
+
+# Start servers
+npm run dev -- --port $FRONTEND_PORT > frontend.log 2>&1 &
+FRONTEND_PID=$!
+
+PORT=$BACKEND_PORT npm run server > backend.log 2>&1 &
+BACKEND_PID=$!
+
+# Verify
+sleep 3
+echo "✅ Frontend PID: $FRONTEND_PID on port $FRONTEND_PORT"
+echo "✅ Backend PID: $BACKEND_PID on port $BACKEND_PORT"
+echo "📊 Dashboard: http://localhost:$FRONTEND_PORT"
+
+# ============================================
+# SPRINT ITEMS TO COMPLETE
+# ============================================
+
+${sprintItems.map((item, i) => `
+# ${i + 1}. [${item.id}] ${item.title} (${item.priority})
+#    ${item.description ? item.description.replace(/\n/g, '\n#    ') : 'No description'}
+#    Status: ${item.status}
+`).join('')}
+
+# ============================================
+# WORKFLOW
+# ============================================
+# 1. Review each item above
+# 2. Ensure you’re in the right git and worktree
+# 3. Start the server on correct front ended back up report.
+# 4. Update status in Ideas & Issues tab as you work with comments and change status.
+# 5. You will be prompted with a close session prompt when the session is done. This will include details about git, worktree hygiene, et.c.`;
+}
+
 function renderEnhancedSessionCardWithTabs(session) {
     const isExpanded = window.expandedSessionId === session.sessionId;
     const activeTab = session.activeTab || 'overview';
@@ -127,75 +209,7 @@ function renderEnhancedSessionCardWithTabs(session) {
                                     
                                     <div class="mb-3">
                                         <div class="font-bold mb-1">START SCRIPT:</div>
-                                        <pre class="bg-white p-3 rounded border text-xs leading-relaxed overflow-x-auto" style="white-space: pre-wrap; word-wrap: break-word;">#!/bin/bash
-# Quick Sprint Session Setup - ${sprintName}
-
-# CONFIGURATION
-PROJECT_PATH="/Users/kellypellas/DevProjects/${activeProject}"
-WORKTREE_NAME="${worktreeName}"
-WORKTREE_PATH="$PROJECT_PATH/worktrees/$WORKTREE_NAME"
-BRANCH="${worktreeName}"
-FRONTEND_PORT=${session.frontendPort || 5173}
-BACKEND_PORT=${session.backendPort || 3001}
-
-echo "🚀 Starting Sprint: ${sprintName}"
-echo "📁 Project: ${activeProject}"
-echo "🌳 Worktree: $WORKTREE_NAME"
-
-# Create worktree if it doesn't exist
-if [ ! -d "$WORKTREE_PATH" ]; then
-    echo "Creating worktree..."
-    cd "$PROJECT_PATH" || exit 1
-    git worktree add "worktrees/$WORKTREE_NAME" -b "$BRANCH" || {
-        # If branch exists, just check it out
-        git worktree add "worktrees/$WORKTREE_NAME" "$BRANCH"
-    }
-fi
-
-# Navigate to worktree
-cd "$WORKTREE_PATH" || exit 1
-
-# Install dependencies if needed
-[[ ! -d "node_modules" ]] && npm install
-
-# Setup git branch
-git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
-
-# Clear ports
-lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null
-lsof -ti:$BACKEND_PORT | xargs kill -9 2>/dev/null
-
-# Start servers
-npm run dev -- --port $FRONTEND_PORT > frontend.log 2>&1 &
-FRONTEND_PID=$!
-
-PORT=$BACKEND_PORT npm run server > backend.log 2>&1 &
-BACKEND_PID=$!
-
-# Verify
-sleep 3
-echo "✅ Frontend PID: $FRONTEND_PID on port $FRONTEND_PORT"
-echo "✅ Backend PID: $BACKEND_PID on port $BACKEND_PORT"
-echo "📊 Dashboard: http://localhost:$FRONTEND_PORT"
-
-# ============================================
-# SPRINT ITEMS TO COMPLETE
-# ============================================
-
-${sprintItems.map((item, i) => `
-# ${i + 1}. [${item.id}] ${item.title} (${item.priority})
-#    ${item.description ? item.description.replace(/\n/g, '\n#    ') : 'No description'}
-#    Status: ${item.status}
-`).join('')}
-
-# ============================================
-# WORKFLOW
-# ============================================
-# 1. Review each item above
-# 2. Update status in Ideas & Issues tab as you work
-# 3. Commit regularly: git add -A && git commit -m "feat: description"
-# 4. Test changes before marking complete
-# 5. When done, use Complete/Stop tab for closing scripts</pre>
+                                        <pre class="bg-white p-3 rounded border text-xs leading-relaxed overflow-x-auto" style="white-space: pre-wrap; word-wrap: break-word;">${generateSessionSetupScript(session)}</pre>
                                     </div>
                                     
                                     <button onclick="event.stopPropagation(); copyStartPrompt('${session.sessionId}')" 
@@ -318,83 +332,7 @@ function saveSessionNotes(sessionId) {
 function copyStartPrompt(sessionId) {
     const session = sessions.find(s => s.sessionId === sessionId);
     if (session) {
-        // Generate start prompt inline
-        const sprintName = session.sprintName || session.sprint;
-        const worktreeName = session.worktreeName || session.worktree;
-        const sprintItems = ideas?.items?.filter(item => 
-            item.sprint === sprintName
-        ) || [];
-        
-        const prompt = `#!/bin/bash
-# Quick Sprint Session Setup - ${sprintName}
-
-# CONFIGURATION
-PROJECT_PATH="/Users/kellypellas/DevProjects/${activeProject}"
-WORKTREE_NAME="${worktreeName}"
-WORKTREE_PATH="$PROJECT_PATH/worktrees/$WORKTREE_NAME"
-BRANCH="${worktreeName}"
-FRONTEND_PORT=${session.frontendPort || 5173}
-BACKEND_PORT=${session.backendPort || 3001}
-
-echo "🚀 Starting Sprint: ${sprintName}"
-echo "📁 Project: ${activeProject}"
-echo "🌳 Worktree: $WORKTREE_NAME"
-
-# Create worktree if it doesn't exist
-if [ ! -d "$WORKTREE_PATH" ]; then
-    echo "Creating worktree..."
-    cd "$PROJECT_PATH" || exit 1
-    git worktree add "worktrees/$WORKTREE_NAME" -b "$BRANCH" || {
-        # If branch exists, just check it out
-        git worktree add "worktrees/$WORKTREE_NAME" "$BRANCH"
-    }
-fi
-
-# Navigate to worktree
-cd "$WORKTREE_PATH" || exit 1
-
-# Install dependencies if needed
-[[ ! -d "node_modules" ]] && npm install
-
-# Setup git branch
-git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
-
-# Clear ports
-lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null
-lsof -ti:$BACKEND_PORT | xargs kill -9 2>/dev/null
-
-# Start servers
-npm run dev -- --port $FRONTEND_PORT > frontend.log 2>&1 &
-FRONTEND_PID=$!
-
-PORT=$BACKEND_PORT npm run server > backend.log 2>&1 &
-BACKEND_PID=$!
-
-# Verify
-sleep 3
-echo "✅ Frontend PID: $FRONTEND_PID on port $FRONTEND_PORT"
-echo "✅ Backend PID: $BACKEND_PID on port $BACKEND_PORT"
-echo "📊 Dashboard: http://localhost:$FRONTEND_PORT"
-
-# ============================================
-# SPRINT ITEMS TO COMPLETE
-# ============================================
-
-${sprintItems.map((item, i) => `
-# ${i + 1}. [${item.id}] ${item.title} (${item.priority})
-#    ${item.description ? item.description.replace(/\n/g, '\n#    ') : 'No description'}
-#    Status: ${item.status}
-`).join('')}
-
-# ============================================
-# WORKFLOW
-# ============================================
-# 1. Review each item above
-# 2. Update status in Ideas & Issues tab as you work
-# 3. Commit regularly: git add -A && git commit -m "feat: description"
-# 4. Test changes before marking complete
-# 5. When done, use Complete/Stop tab for closing scripts`;
-        
+        const prompt = generateSessionSetupScript(session);
         navigator.clipboard.writeText(prompt);
         alert('Start script with sprint items copied to clipboard!');
     }
@@ -415,6 +353,8 @@ function generateCloseScript(sessionId, outcome) {
     
     const sprintName = session.sprintName || session.sprint;
     const worktreeName = session.worktreeName || session.worktree;
+    const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
+    const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
     const sprintItems = ideas?.items?.filter(item => 
         item.sprint === sprintName
     ) || [];
@@ -448,8 +388,8 @@ git push origin ${worktreeName}
 
 ## Stop Servers
 \`\`\`bash
-lsof -ti:${session.frontendPort || 5173} | xargs kill -9
-lsof -ti:${session.backendPort || 3001} | xargs kill -9
+lsof -ti:${frontendPort} | xargs kill -9
+lsof -ti:${backendPort} | xargs kill -9
 \`\`\`
 
 ✅ Work saved - continue in next session`;
@@ -491,8 +431,8 @@ Mark completed items as 'done' in Ideas & Issues tab
 
 ## Stop Servers
 \`\`\`bash
-lsof -ti:${session.frontendPort || 5173} | xargs kill -9
-lsof -ti:${session.backendPort || 3001} | xargs kill -9
+lsof -ti:${frontendPort} | xargs kill -9
+lsof -ti:${backendPort} | xargs kill -9
 \`\`\`
 
 ✅ Sprint complete - ready for merge!`;
@@ -512,8 +452,8 @@ git clean -fd
 
 ## Stop Servers
 \`\`\`bash
-lsof -ti:${session.frontendPort || 5173} | xargs kill -9
-lsof -ti:${session.backendPort || 3001} | xargs kill -9
+lsof -ti:${frontendPort} | xargs kill -9
+lsof -ti:${backendPort} | xargs kill -9
 \`\`\`
 
 ## Reset Item Statuses
@@ -586,8 +526,8 @@ git status
 git log origin/${worktreeName}..${worktreeName}
 
 # Check ports
-lsof -ti:${session.frontendPort || 5173}
-lsof -ti:${session.backendPort || 3001}
+lsof -ti:${frontendPort}
+lsof -ti:${backendPort}
 
 # Verify ideas.json updates
 git diff HEAD~1 ideas.json
@@ -595,7 +535,7 @@ git diff HEAD~1 ideas.json
                 </div>
                 
                 <div class="mt-3">
-                    <button onclick="navigator.clipboard.writeText(\`git status; git log origin/${worktreeName}..${worktreeName}; lsof -ti:${session.frontendPort || 5173}; lsof -ti:${session.backendPort || 3001}\`); alert('Verification commands copied!');" 
+                    <button onclick="navigator.clipboard.writeText(\`git status; git log origin/${worktreeName}..${worktreeName}; lsof -ti:${session.worktree?.frontendPort || 5173}; lsof -ti:${session.worktree?.backendPort || 3001}\`); alert('Verification commands copied!');" 
                         class="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
                         Copy Verification Commands
                     </button>
@@ -610,6 +550,8 @@ function copyScript(scriptType, sessionId) {
     if (!session) return;
     
     const sprintName = session.sprintName || session.sprint;
+    const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
+    const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
     const sprintItems = ideas?.items?.filter(item => 
         item.sprint === sprintName
     ) || [];
@@ -620,8 +562,8 @@ function copyScript(scriptType, sessionId) {
         script = `#!/bin/bash
 # Quick Session Cleanup - ${sprintName}
 
-FRONTEND_PORT=${session.frontendPort || 5173}
-BACKEND_PORT=${session.backendPort || 3001}
+FRONTEND_PORT=${frontendPort}
+BACKEND_PORT=${backendPort}
 
 echo "🛑 Stopping Sprint Session: ${sprintName}"
 
@@ -657,8 +599,8 @@ ITEM_ID="${item.id}"
 jq '.items |= map(if .id == "'$ITEM_ID'" then . + {"status": "done", "completedAt": "'$(date -Iseconds)'"} else . end)' .ideas.json > tmp.json && mv tmp.json .ideas.json`).join('')}
 
 # Stop servers
-lsof -ti:${session.frontendPort || 5173} | xargs kill -9 2>/dev/null
-lsof -ti:${session.backendPort || 3001} | xargs kill -9 2>/dev/null
+lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null
+lsof -ti:${backendPort} | xargs kill -9 2>/dev/null
 
 echo "✅ Sprint ${sprintName} completed and pushed"`;
     }
@@ -818,8 +760,8 @@ function verifySessionClosure(sessionId) {
     };
     
     // Check for running processes
-    const frontendPort = session.frontendPort || 5173;
-    const backendPort = session.backendPort || 3001;
+    const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
+    const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
     
     // Get sprint items status
     const sprintItems = ideas?.items?.filter(item => 
@@ -877,6 +819,8 @@ function showPostSessionSummary(sessionId) {
     const session = sessions.find(s => s.sessionId === sessionId);
     const sprintName = session?.sprintName || session?.sprint || 'Unknown Sprint';
     const worktreeName = session?.worktreeName || session?.worktree || 'Unknown Worktree';
+    const frontendPort = session?.worktree?.frontendPort || session?.frontendPort || 5173;
+    const backendPort = session?.worktree?.backendPort || session?.backendPort || 3001;
     
     // Create summary modal
     const summaryDiv = document.createElement('div');
@@ -945,11 +889,11 @@ function showPostSessionSummary(sessionId) {
         <div class="border-t pt-3">
             <h4 class="text-xs font-bold mb-2">🔍 Verify Cleanup</h4>
             <div class="bg-gray-50 rounded p-2 text-xs font-mono space-y-1">
-                <div>lsof -ti:${session?.frontendPort || 5173} | wc -l  # Should be 0</div>
-                <div>lsof -ti:${session?.backendPort || 3001} | wc -l  # Should be 0</div>
+                <div>lsof -ti:${frontendPort} | wc -l  # Should be 0</div>
+                <div>lsof -ti:${backendPort} | wc -l  # Should be 0</div>
                 <div>git status  # Check for uncommitted changes</div>
             </div>
-            <button onclick="navigator.clipboard.writeText('lsof -ti:${session?.frontendPort || 5173} | wc -l; lsof -ti:${session?.backendPort || 3001} | wc -l; cd ${session?.workingPath || '.'} && git status'); alert('Commands copied!')" 
+            <button onclick="navigator.clipboard.writeText('lsof -ti:${frontendPort} | wc -l; lsof -ti:${backendPort} | wc -l; cd ${session?.workingPath || '.'} && git status'); alert('Commands copied!')" 
                 class="mt-2 px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
                 Copy Verification Commands
             </button>
