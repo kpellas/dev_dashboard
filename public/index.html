@@ -799,7 +799,9 @@
         async function deleteMergedBranch(branchName) {
             if (confirm(`Delete merged branch '${branchName}'?\n\nThis will run: git branch -d ${branchName}`)) {
                 try {
-                    const res = await fetch(`/api/projects/${activeProject}/branches/${branchName}`, {
+                    // Encode branch name to handle slashes
+                    const encodedBranch = encodeURIComponent(branchName);
+                    const res = await fetch(`/api/projects/${activeProject}/branches/${encodedBranch}`, {
                         method: 'DELETE'
                     });
                     
@@ -845,11 +847,22 @@
             
             if (confirm(explanation + '\n\nProceed?')) {
                 try {
-                    const res = await fetch(`/api/projects/${activeProject}/branches/${branchName}/update`, {
+                    // Encode the branch name to handle slashes in branch names like feature/something
+                    const encodedBranch = encodeURIComponent(branchName);
+                    const res = await fetch(`/api/projects/${activeProject}/branches/${encodedBranch}/update`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ method })
                     });
+                    
+                    // Check if response is JSON
+                    const contentType = res.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        const text = await res.text();
+                        console.error('Server returned non-JSON response:', text);
+                        alert(`❌ Server error: Expected JSON but got HTML. The server may be down or the endpoint may not exist.\n\nCheck the console for details.`);
+                        return;
+                    }
                     
                     if (res.ok) {
                         const result = await res.json();
@@ -860,6 +873,7 @@
                         alert(`❌ Failed to ${method} branch:\n\n${error.error}\n\n${error.hint || 'You may need to resolve this manually.'}`);
                     }
                 } catch (error) {
+                    console.error('Error updating branch:', error);
                     alert(`Error updating branch: ${error.message}`);
                 }
             }
@@ -1629,5 +1643,74 @@ Improve performance"></textarea>
             }
         });
     </script>
+    <!-- Copyable Modal -->
+    <div id="copyModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-xl">
+                <div class="flex justify-between items-center p-4 border-b">
+                    <h3 id="modalTitle" class="text-lg font-semibold"></h3>
+                    <button onclick="closeCopyModal()" class="text-gray-500 hover:text-gray-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="p-4 overflow-y-auto max-h-[60vh]">
+                    <pre id="modalContent" class="whitespace-pre-wrap font-mono text-sm bg-gray-50 p-4 rounded select-all"></pre>
+                </div>
+                <div class="flex justify-end gap-2 p-4 border-t">
+                    <button onclick="copyModalContent()" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Copy to Clipboard
+                    </button>
+                    <button onclick="closeCopyModal()" class="px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Modal functions
+        function showCopyModal(title, content) {
+            document.getElementById('modalTitle').textContent = title || 'Information';
+            document.getElementById('modalContent').textContent = content;
+            document.getElementById('copyModal').classList.remove('hidden');
+        }
+        
+        function closeCopyModal() {
+            document.getElementById('copyModal').classList.add('hidden');
+        }
+        
+        async function copyModalContent() {
+            const content = document.getElementById('modalContent').textContent;
+            try {
+                await navigator.clipboard.writeText(content);
+                // Show feedback
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                btn.classList.add('bg-green-500');
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.classList.remove('bg-green-500');
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+            }
+        }
+        
+        // Override alert to use the modal for important messages
+        const originalAlert = window.alert;
+        window.alert = function(message) {
+            // Check if message contains important info that might need copying
+            if (message && (message.includes('Failed') || message.includes('Error') || message.includes('Success') || message.length > 200)) {
+                showCopyModal('Message', message);
+            } else {
+                originalAlert(message);
+            }
+        };
+    </script>
+
 </body>
 </html>

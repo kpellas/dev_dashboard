@@ -581,8 +581,12 @@ app.delete('/api/sessions/:sessionId', async (req, res) => {
 });
 
 // Update a stale branch with main
-app.post('/api/projects/:projectId/branches/:branchName/update', async (req, res) => {
-  const { projectId, branchName } = req.params;
+// Use * to capture branch names with slashes
+app.post('/api/projects/:projectId/branches/*/update', async (req, res) => {
+  const { projectId } = req.params;
+  // Extract branch name from the URL (handles slashes in branch names)
+  const fullPath = req.params[0]; // This captures everything after /branches/
+  const branchName = decodeURIComponent(fullPath);
   const { method } = req.body; // 'merge' or 'rebase'
   const data = await loadProjects();
   const project = data.projects[projectId];
@@ -652,8 +656,11 @@ app.post('/api/projects/:projectId/branches/:branchName/update', async (req, res
 });
 
 // Delete a branch
-app.delete('/api/projects/:projectId/branches/:branchName', async (req, res) => {
-  const { projectId, branchName } = req.params;
+// Use * to capture branch names with slashes
+app.delete('/api/projects/:projectId/branches/*', async (req, res) => {
+  const { projectId } = req.params;
+  // Extract branch name from the URL (handles slashes in branch names)
+  const branchName = decodeURIComponent(req.params[0]);
   const data = await loadProjects();
   const project = data.projects[projectId];
   
