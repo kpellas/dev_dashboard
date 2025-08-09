@@ -5,19 +5,197 @@ let editingSprintId = null;
 let editingWorktreeId = null;
 let editingSessionId = null;
 let expandedSprintId = null;
+let editingCommentIndex = null;
 // expandedSessionId is already declared in session-management.js
 
+// Filtering and sorting state
+let filterSettings = {
+    status: 'all',
+    type: 'all',
+    priority: 'all',
+    sprint: 'all',
+    searchQuery: ''
+};
+let sortSettings = {
+    field: 'updated',
+    direction: 'desc'
+};
+
 function renderIdeasTab() {
-    const items = window.ideas.items?.filter(item => 
-        item.status !== 'done' && item.status !== 'archived'
-    ) || [];
+    let items = window.ideas.items || [];
+    
+    // Apply filters
+    items = items.filter(item => {
+        // Don't show archived items by default
+        if (item.status === 'archived' && filterSettings.status !== 'archived') return false;
+        
+        // Status filter
+        if (filterSettings.status !== 'all') {
+            if (filterSettings.status === 'active') {
+                if (item.status === 'done' || item.status === 'archived' || item.status === 'closed') return false;
+            } else if (filterSettings.status !== item.status) {
+                return false;
+            }
+        }
+        
+        // Type filter
+        if (filterSettings.type !== 'all' && item.type !== filterSettings.type) return false;
+        
+        // Priority filter
+        if (filterSettings.priority !== 'all' && item.priority !== filterSettings.priority) return false;
+        
+        // Sprint filter
+        if (filterSettings.sprint !== 'all') {
+            const itemSprint = item.sprint || 'backlog';
+            if (filterSettings.sprint === 'backlog' && item.sprint) return false;
+            if (filterSettings.sprint !== 'backlog' && filterSettings.sprint !== itemSprint) return false;
+        }
+        
+        // Search filter
+        if (filterSettings.searchQuery) {
+            const query = filterSettings.searchQuery.toLowerCase();
+            const matchesSearch = 
+                item.title?.toLowerCase().includes(query) ||
+                item.description?.toLowerCase().includes(query) ||
+                item.id?.toLowerCase().includes(query) ||
+                item.tags?.some(tag => tag.toLowerCase().includes(query));
+            if (!matchesSearch) return false;
+        }
+        
+        return true;
+    });
+    
+    // Apply sorting
+    items.sort((a, b) => {
+        let aVal, bVal;
+        
+        switch (sortSettings.field) {
+            case 'priority':
+                const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+                aVal = priorityOrder[a.priority] || 0;
+                bVal = priorityOrder[b.priority] || 0;
+                break;
+            case 'status':
+                const statusOrder = { new: 1, in_progress: 2, review: 3, done: 4, closed: 5, archived: 6 };
+                aVal = statusOrder[a.status] || 0;
+                bVal = statusOrder[b.status] || 0;
+                break;
+            case 'title':
+                aVal = a.title?.toLowerCase() || '';
+                bVal = b.title?.toLowerCase() || '';
+                break;
+            case 'created':
+                aVal = new Date(a.created || 0).getTime();
+                bVal = new Date(b.created || 0).getTime();
+                break;
+            case 'updated':
+            default:
+                aVal = new Date(a.updated || a.created || 0).getTime();
+                bVal = new Date(b.updated || b.created || 0).getTime();
+                break;
+        }
+        
+        if (sortSettings.direction === 'asc') {
+            return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+        } else {
+            return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
+        }
+    });
+    
+    // Render filter controls
+    const filterControls = `
+        <div class="mb-4 p-3 bg-gray-50 rounded-lg space-y-3">
+            <div class="flex flex-wrap gap-2">
+                <input type="text" 
+                    id="searchFilter"
+                    placeholder="Search..." 
+                    value="${filterSettings.searchQuery}"
+                    onkeyup="updateSearchFilter(this.value)"
+                    class="px-3 py-1 text-sm border rounded flex-1 min-w-[200px]">
+                
+                <select id="statusFilter" onchange="updateFilter('status', this.value)" 
+                    class="px-3 py-1 text-sm border rounded bg-white">
+                    <option value="all">All Status</option>
+                    <option value="active" ${filterSettings.status === 'active' ? 'selected' : ''}>Active</option>
+                    <option value="new" ${filterSettings.status === 'new' ? 'selected' : ''}>New</option>
+                    <option value="in_progress" ${filterSettings.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
+                    <option value="review" ${filterSettings.status === 'review' ? 'selected' : ''}>Review</option>
+                    <option value="done" ${filterSettings.status === 'done' ? 'selected' : ''}>Done</option>
+                    <option value="closed" ${filterSettings.status === 'closed' ? 'selected' : ''}>Closed</option>
+                    <option value="archived" ${filterSettings.status === 'archived' ? 'selected' : ''}>Archived</option>
+                </select>
+                
+                <select id="typeFilter" onchange="updateFilter('type', this.value)" 
+                    class="px-3 py-1 text-sm border rounded bg-white">
+                    <option value="all">All Types</option>
+                    <option value="bug" ${filterSettings.type === 'bug' ? 'selected' : ''}>Bug</option>
+                    <option value="feature" ${filterSettings.type === 'feature' ? 'selected' : ''}>Feature</option>
+                    <option value="task" ${filterSettings.type === 'task' ? 'selected' : ''}>Task</option>
+                    <option value="idea" ${filterSettings.type === 'idea' ? 'selected' : ''}>Idea</option>
+                </select>
+                
+                <select id="priorityFilter" onchange="updateFilter('priority', this.value)" 
+                    class="px-3 py-1 text-sm border rounded bg-white">
+                    <option value="all">All Priorities</option>
+                    <option value="critical" ${filterSettings.priority === 'critical' ? 'selected' : ''}>Critical</option>
+                    <option value="high" ${filterSettings.priority === 'high' ? 'selected' : ''}>High</option>
+                    <option value="medium" ${filterSettings.priority === 'medium' ? 'selected' : ''}>Medium</option>
+                    <option value="low" ${filterSettings.priority === 'low' ? 'selected' : ''}>Low</option>
+                </select>
+                
+                <select id="sprintFilter" onchange="updateFilter('sprint', this.value)" 
+                    class="px-3 py-1 text-sm border rounded bg-white">
+                    <option value="all">All Sprints</option>
+                    <option value="backlog" ${filterSettings.sprint === 'backlog' ? 'selected' : ''}>Backlog</option>
+                    ${Object.keys(window.ideas.sprints || {}).map(name => 
+                        `<option value="${name}" ${filterSettings.sprint === name ? 'selected' : ''}>${name}</option>`
+                    ).join('')}
+                </select>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-600">Sort by:</span>
+                <select id="sortField" onchange="updateSort('field', this.value)" 
+                    class="px-3 py-1 text-sm border rounded bg-white">
+                    <option value="updated" ${sortSettings.field === 'updated' ? 'selected' : ''}>Last Updated</option>
+                    <option value="created" ${sortSettings.field === 'created' ? 'selected' : ''}>Created</option>
+                    <option value="priority" ${sortSettings.field === 'priority' ? 'selected' : ''}>Priority</option>
+                    <option value="status" ${sortSettings.field === 'status' ? 'selected' : ''}>Status</option>
+                    <option value="title" ${sortSettings.field === 'title' ? 'selected' : ''}>Title</option>
+                </select>
+                
+                <button onclick="toggleSortDirection()" 
+                    class="px-2 py-1 text-sm border rounded hover:bg-gray-100" 
+                    title="Toggle sort direction">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        ${sortSettings.direction === 'asc' ? 
+                            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>' :
+                            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4"></path>'
+                        }
+                    </svg>
+                </button>
+                
+                <span class="ml-auto text-sm text-gray-600">
+                    Showing ${items.length} ${items.length === 1 ? 'item' : 'items'}
+                </span>
+                
+                ${Object.values(filterSettings).some(v => v !== 'all' && v !== '') ? `
+                    <button onclick="clearFilters()" 
+                        class="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700">
+                        Clear Filters
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+    `;
     
     if (items.length === 0) {
-        document.getElementById('ideasList').innerHTML = '<p class="text-gray-500">No issues or ideas yet</p>';
+        document.getElementById('ideasList').innerHTML = filterControls + 
+            '<p class="text-gray-500 text-center py-8">No items match your filters</p>';
         return;
     }
     
-    document.getElementById('ideasList').innerHTML = items.map(item => {
+    const itemsHtml = items.map(item => {
         const isEditing = editingItemId === item.id;
         
         if (isEditing) {
@@ -43,6 +221,7 @@ function renderIdeasTab() {
                                 <option value="in_progress" ${item.status === 'in_progress' ? 'selected' : ''}>In Progress</option>
                                 <option value="review" ${item.status === 'review' ? 'selected' : ''}>Review</option>
                                 <option value="done" ${item.status === 'done' ? 'selected' : ''}>Done</option>
+                                <option value="closed" ${item.status === 'closed' ? 'selected' : ''}>Closed</option>
                             </select>
                         </div>
                         <input id="edit-title-${item.id}" type="text" value="${item.title.replace(/"/g, '&quot;')}" 
@@ -128,12 +307,48 @@ function renderIdeasTab() {
                             <div class="mt-3 pt-3 border-t">
                                 <div class="text-xs font-medium text-gray-600 mb-1">Comments (${item.comments.length})</div>
                                 <div class="space-y-2 max-h-40 overflow-y-auto bg-gray-50 p-2 rounded">
-                                    ${item.comments.map(c => `
-                                        <div class="text-xs bg-white p-2 rounded border">
-                                            <span class="text-gray-500">${new Date(c.timestamp).toLocaleString()}</span>
-                                            <div class="mt-1 text-gray-800 break-words">${c.text}</div>
-                                        </div>
-                                    `).join('')}
+                                    ${item.comments.map((c, idx) => {
+                                        const isEditingComment = editingItemId === item.id && editingCommentIndex === idx;
+                                        return isEditingComment ? `
+                                            <div class="text-xs bg-yellow-50 p-2 rounded border-2 border-yellow-300" onclick="event.stopPropagation()">
+                                                <textarea id="edit-comment-${item.id}-${idx}" 
+                                                    class="w-full px-2 py-1 text-xs border rounded" 
+                                                    rows="2">${c.text}</textarea>
+                                                <div class="flex justify-end gap-1 mt-1">
+                                                    <button onclick="cancelCommentEdit()" 
+                                                        class="px-2 py-0.5 text-xs border rounded hover:bg-gray-100">
+                                                        Cancel
+                                                    </button>
+                                                    <button onclick="saveCommentEdit('${item.id}', ${idx})" 
+                                                        class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
+                                                        Save
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ` : `
+                                            <div class="text-xs bg-white p-2 rounded border group hover:bg-gray-50">
+                                                <div class="flex justify-between items-start">
+                                                    <span class="text-gray-500">${new Date(c.timestamp).toLocaleString()}</span>
+                                                    <div class="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1" onclick="event.stopPropagation()">
+                                                        <button onclick="startCommentEdit('${item.id}', ${idx})" 
+                                                            class="text-gray-500 hover:text-gray-700" title="Edit">
+                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                                            </svg>
+                                                        </button>
+                                                        <button onclick="deleteComment('${item.id}', ${idx})" 
+                                                            class="text-gray-500 hover:text-gray-700" title="Delete">
+                                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div class="mt-1 text-gray-800 break-words">${c.text}</div>
+                                                ${c.edited ? `<div class="text-[10px] text-gray-400 mt-1">edited</div>` : ''}
+                                            </div>
+                                        `;
+                                    }).join('')}
                                 </div>
                             </div>
                         ` : ''}
@@ -154,7 +369,19 @@ function renderIdeasTab() {
                             </div>
                         </div>
                     </div>
-                    <div class="mt-3 pt-3 border-t flex justify-end" onclick="event.stopPropagation()">
+                    <div class="mt-3 pt-3 border-t flex justify-between" onclick="event.stopPropagation()">
+                        ${item.status !== 'closed' && item.status !== 'archived' ? `
+                            <button onclick="event.stopPropagation(); closeItem('${item.id}')" 
+                                class="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600">
+                                Close Item
+                            </button>
+                        ` : 
+                        item.status === 'closed' ? `
+                            <button onclick="event.stopPropagation(); reopenItem('${item.id}')" 
+                                class="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600">
+                                Reopen Item
+                            </button>
+                        ` : '<div></div>'}
                         <select onclick="event.stopPropagation()" onchange="handleSprintMove('${item.id}', this.value); this.value='';" 
                             class="px-2 py-1 text-xs border rounded bg-white hover:bg-gray-50">
                             <option value="">Move to Sprint...</option>
@@ -169,6 +396,9 @@ function renderIdeasTab() {
             `;
         }
     }).join('');
+    
+    // Add filter controls and items to the page
+    document.getElementById('ideasList').innerHTML = filterControls + itemsHtml;
 }
 
 function startEdit(itemId) {
@@ -510,7 +740,10 @@ function renderSprintsTab() {
                         <div class="mt-3 pt-3 border-t">
                             <button onclick="toggleSprintItems('${name}')" 
                                 class="text-xs text-gray-600 hover:text-gray-800 mb-2">
-                                ${isExpanded ? '▼' : '▶'} Show Items (${items.length})
+                                <svg class="inline-block w-3 h-3 mr-1 transition-transform ${isExpanded ? 'rotate-90' : ''}" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
+                                </svg>
+                                Show Items (${items.length})
                             </button>
                             ${isExpanded ? `
                                 <div class="space-y-1 mt-2">
@@ -731,10 +964,15 @@ function renderWorktreesTab() {
                                                 ${wt.gitStatus.modifiedFiles.slice(0, 10).map(file => `
                                                     <div class="flex items-center gap-1">
                                                         <span class="text-gray-500">${
-                                                            file.status === 'M' ? '●' :
-                                                            file.status === 'A' ? '+' :
-                                                            file.status === 'D' ? '-' :
-                                                            file.status === '??' ? '?' : '○'
+                                                            file.status === 'M' ? 
+                                                                '<svg class="inline-block w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"></circle></svg>' :
+                                                            file.status === 'A' ? 
+                                                                '<svg class="inline-block w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 20 20"><path d="M10 5v10M5 10h10"></path></svg>' :
+                                                            file.status === 'D' ? 
+                                                                '<svg class="inline-block w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 20 20"><path d="M5 10h10"></path></svg>' :
+                                                            file.status === '??' ? 
+                                                                '<svg class="inline-block w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 20 20"><path d="M10 9v2m0 4h.01M10 3a7 7 0 100 14 7 7 0 000-14z"></path></svg>' : 
+                                                                '<svg class="inline-block w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"></circle></svg>'
                                                         }</span>
                                                         <span>${file.path}</span>
                                                     </div>
@@ -770,7 +1008,10 @@ function renderWorktreesTab() {
                                             </div>
                                             ${window.serverStatus?.[wt.name]?.frontend?.status === 'error' ? `
                                                 <div class="text-xs text-red-600 mt-1 ml-4">
-                                                    ⚠️ ${window.serverStatus[wt.name].frontend.message}
+                                                    <svg class="inline-block w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                                                    </svg>
+                                                    ${window.serverStatus[wt.name].frontend.message}
                                                 </div>
                                             ` : ''}
                                         </div>
@@ -798,7 +1039,10 @@ function renderWorktreesTab() {
                                             </div>
                                             ${window.serverStatus?.[wt.name]?.backend?.status === 'error' ? `
                                                 <div class="text-xs text-red-600 mt-1 ml-4">
-                                                    ⚠️ ${window.serverStatus[wt.name].backend.message}
+                                                    <svg class="inline-block w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                                                    </svg>
+                                                    ${window.serverStatus[wt.name].backend.message}
                                                 </div>
                                             ` : ''}
                                         </div>
@@ -1211,6 +1455,164 @@ async function restartServer(worktreeName, serverType, port) {
     }
 }
 
+// Filter and sort functions
+function updateFilter(field, value) {
+    filterSettings[field] = value;
+    renderIdeasTab();
+}
+
+function updateSearchFilter(value) {
+    filterSettings.searchQuery = value;
+    renderIdeasTab();
+}
+
+function updateSort(field, value) {
+    if (field === 'field') {
+        sortSettings.field = value;
+    } else if (field === 'direction') {
+        sortSettings.direction = value;
+    }
+    renderIdeasTab();
+}
+
+function toggleSortDirection() {
+    sortSettings.direction = sortSettings.direction === 'asc' ? 'desc' : 'asc';
+    renderIdeasTab();
+}
+
+function clearFilters() {
+    filterSettings = {
+        status: 'all',
+        type: 'all',
+        priority: 'all',
+        sprint: 'all',
+        searchQuery: ''
+    };
+    renderIdeasTab();
+}
+
+// Comment editing functions
+function startCommentEdit(itemId, commentIndex) {
+    editingItemId = itemId;
+    editingCommentIndex = commentIndex;
+    renderIdeasTab();
+}
+
+function cancelCommentEdit() {
+    editingItemId = null;
+    editingCommentIndex = null;
+    renderIdeasTab();
+}
+
+async function saveCommentEdit(itemId, commentIndex) {
+    const item = window.ideas.items.find(i => i.id === itemId);
+    if (!item || !item.comments || !item.comments[commentIndex]) return;
+    
+    const newText = document.getElementById(`edit-comment-${itemId}-${commentIndex}`).value.trim();
+    if (!newText) {
+        alert('Comment cannot be empty');
+        return;
+    }
+    
+    item.comments[commentIndex].text = newText;
+    item.comments[commentIndex].edited = new Date().toISOString();
+    item.updated = new Date().toISOString();
+    
+    try {
+        await fetch(`/api/projects/${window.activeProject}/ideas`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(window.ideas)
+        });
+        
+        editingItemId = null;
+        editingCommentIndex = null;
+        renderIdeasTab();
+    } catch (error) {
+        alert('Failed to save comment: ' + error.message);
+    }
+}
+
+async function deleteComment(itemId, commentIndex) {
+    if (!confirm('Delete this comment?')) return;
+    
+    const item = window.ideas.items.find(i => i.id === itemId);
+    if (!item || !item.comments) return;
+    
+    item.comments.splice(commentIndex, 1);
+    item.updated = new Date().toISOString();
+    
+    try {
+        await fetch(`/api/projects/${window.activeProject}/ideas`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(window.ideas)
+        });
+        
+        renderIdeasTab();
+    } catch (error) {
+        alert('Failed to delete comment: ' + error.message);
+    }
+}
+
+// Item closing/reopening functions
+async function closeItem(itemId) {
+    const item = window.ideas.items.find(i => i.id === itemId);
+    if (!item) return;
+    
+    if (confirm(`Close item "${item.title}"?\n\nThis will mark it as closed but not delete it.`)) {
+        item.status = 'closed';
+        item.closedAt = new Date().toISOString();
+        item.updated = new Date().toISOString();
+        
+        try {
+            await fetch(`/api/projects/${window.activeProject}/ideas`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(window.ideas)
+            });
+            
+            renderIdeasTab();
+            if (typeof updateOverview === 'function') updateOverview();
+        } catch (error) {
+            alert('Failed to close item: ' + error.message);
+        }
+    }
+}
+
+async function reopenItem(itemId) {
+    const item = window.ideas.items.find(i => i.id === itemId);
+    if (!item) return;
+    
+    item.status = 'new';
+    delete item.closedAt;
+    item.updated = new Date().toISOString();
+    
+    try {
+        await fetch(`/api/projects/${window.activeProject}/ideas`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(window.ideas)
+        });
+        
+        renderIdeasTab();
+        if (typeof updateOverview === 'function') updateOverview();
+    } catch (error) {
+        alert('Failed to reopen item: ' + error.message);
+    }
+}
+
+window.updateFilter = updateFilter;
+window.updateSearchFilter = updateSearchFilter;
+window.updateSort = updateSort;
+window.toggleSortDirection = toggleSortDirection;
+window.clearFilters = clearFilters;
+window.startCommentEdit = startCommentEdit;
+window.cancelCommentEdit = cancelCommentEdit;
+window.saveCommentEdit = saveCommentEdit;
+window.deleteComment = deleteComment;
+window.closeItem = closeItem;
+window.reopenItem = reopenItem;
 window.toggleSprintItems = toggleSprintItems;
 window.archiveWorktree = archiveWorktree;
 window.startServer = startServer;

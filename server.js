@@ -65,6 +65,185 @@ async function saveProjects(data) {
 
 // API Routes
 
+// Create new project
+app.post('/api/projects/create', async (req, res) => {
+  try {
+    const { id, name, description, icon, location = 'new', path: projectPath, gitInit, github } = req.body;
+    
+    // Load existing projects
+    const projectsData = await loadProjects();
+    
+    // Check if project already exists
+    if (projectsData.projects[id]) {
+      return res.status(400).json({ message: 'Project with this ID already exists' });
+    }
+    
+    // Set the actual project path
+    const actualProjectPath = projectPath || path.join('/Users/kellypellas/DevProjects', id);
+    
+    // Create or verify project directory
+    try {
+      await fs.access(actualProjectPath);
+      // Directory exists, which is fine for both 'new' and 'existing' locations
+      console.log(`Using existing directory: ${actualProjectPath}`);
+    } catch {
+      // Directory doesn't exist
+      if (location === 'new') {
+        // Create it if we're supposed to create a new one
+        try {
+          await fs.mkdir(actualProjectPath, { recursive: true });
+          console.log(`Created new directory: ${actualProjectPath}`);
+        } catch (error) {
+          return res.status(500).json({ message: `Failed to create directory: ${error.message}` });
+        }
+      } else {
+        // For existing location, the directory must exist
+        return res.status(400).json({ message: 'Specified directory does not exist' });
+      }
+    }
+    
+    // Initialize git if requested
+    if (gitInit) {
+      try {
+        const { execSync } = require('child_process');
+        
+        // Initialize git repository
+        execSync('git init', { cwd: actualProjectPath });
+        
+        // Create initial .gitignore
+        const gitignoreContent = `node_modules/
+.env
+.DS_Store
+*.log
+dist/
+build/
+.ideas.json
+.workflow-state.json
+`;
+        await fs.writeFile(path.join(actualProjectPath, '.gitignore'), gitignoreContent);
+        
+        // Create initial README
+        const readmeContent = `# ${name}
+
+${description}
+
+## Setup
+
+\`\`\`bash
+npm install
+\`\`\`
+
+## Development
+
+\`\`\`bash
+npm run dev
+\`\`\`
+`;
+        await fs.writeFile(path.join(actualProjectPath, 'README.md'), readmeContent);
+        
+        // Create package.json if it doesn't exist
+        const packageJsonPath = path.join(actualProjectPath, 'package.json');
+        try {
+          await fs.access(packageJsonPath);
+        } catch {
+          const packageJson = {
+            name: id,
+            version: "1.0.0",
+            description: description,
+            main: "index.js",
+            scripts: {
+              dev: "echo 'Configure your dev script'",
+              test: "echo 'Configure your test script'",
+              lint: "echo 'Configure your lint script'"
+            }
+          };
+          await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
+        }
+        
+        // Initial commit
+        execSync('git add .', { cwd: actualProjectPath });
+        execSync('git commit -m "Initial commit"', { cwd: actualProjectPath });
+        
+        // Create GitHub repository if requested
+        let githubUrl = null;
+        if (github) {
+          try {
+            // Create GitHub repo using gh CLI
+            const visibility = github.visibility === 'public' ? '--public' : '--private';
+            const repoName = github.repo;
+            
+            // Create the repository
+            execSync(`gh repo create ${github.username}/${repoName} ${visibility} --source="${actualProjectPath}" --remote=origin --push`, {
+              cwd: actualProjectPath,
+              stdio: 'pipe'
+            });
+            
+            githubUrl = `https://github.com/${github.username}/${repoName}`;
+          } catch (ghError) {
+            console.error('GitHub creation error:', ghError.message);
+            // Continue even if GitHub creation fails
+          }
+        }
+        
+      } catch (gitError) {
+        console.error('Git initialization error:', gitError.message);
+        return res.status(500).json({ message: `Git initialization failed: ${gitError.message}` });
+      }
+    }
+    
+    // Create .ideas.json file
+    const ideasJson = {
+      items: [],
+      sprints: {},
+      lastId: 0
+    };
+    await fs.writeFile(path.join(actualProjectPath, '.ideas.json'), JSON.stringify(ideasJson, null, 2));
+    
+    // Add project to projects.json
+    projectsData.projects[id] = {
+      id,
+      name,
+      description,
+      path: actualProjectPath,
+      repository: id,
+      primaryColor: "#3B82F6",
+      icon,
+      settings: {
+        apiPort: 3000 + Object.keys(projectsData.projects).length + 1,
+        frontendPort: 5173 + Object.keys(projectsData.projects).length,
+        gitEnabled: gitInit,
+        worktreesEnabled: gitInit,
+        devCommand: "npm run dev",
+        testCommand: "npm test",
+        lintCommand: "npm run lint"
+      },
+      files: {
+        ideas: ".ideas.json",
+        claude: null,
+        currentState: null
+      },
+      createdAt: new Date().toISOString(),
+      lastAccessed: new Date().toISOString()
+    };
+    
+    // Set as active project
+    projectsData.activeProject = id;
+    
+    // Save updated projects
+    await saveProjects(projectsData);
+    
+    res.json({ 
+      success: true, 
+      project: projectsData.projects[id],
+      githubUrl: github ? `https://github.com/${github.username}/${github.repo}` : null
+    });
+    
+  } catch (error) {
+    console.error('Error creating project:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Get all projects
 app.get('/api/projects', async (req, res) => {
   const data = await loadProjects();
@@ -506,7 +685,7 @@ app.post('/api/worktree-config', async (req, res) => {
   const { projectPath, worktreeName, config } = req.body;
   
   try {
-    const configPath = path.join(projectPath, 'worktrees', worktreeName, '.worktree-config.json');
+    const configPath = path.join(actualProjectPath, 'worktrees', worktreeName, '.worktree-config.json');
     await fs.writeFile(configPath, JSON.stringify(config, null, 2));
     res.json({ success: true });
   } catch (error) {
