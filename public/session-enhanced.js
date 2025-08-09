@@ -41,8 +41,9 @@ fi
 # Navigate to worktree
 cd "$WORKTREE_PATH" || exit 1
 
-# Install dependencies if needed
-[[ ! -d "node_modules" ]] && npm install
+# Install dependencies
+echo "Installing dependencies..."
+npm install
 
 # Setup git branch
 git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
@@ -208,14 +209,30 @@ function renderEnhancedSessionCardWithTabs(session) {
                                     <div class="text-xs mb-3">Session: ${session.sessionId} | Worktree: ${worktreeName}</div>
                                     
                                     <div class="mb-3">
-                                        <div class="font-bold mb-1">START SCRIPT:</div>
-                                        <pre class="bg-white p-3 rounded border text-xs leading-relaxed overflow-x-auto" style="white-space: pre-wrap; word-wrap: break-word;">${generateSessionSetupScript(session)}</pre>
+                                        <div class="font-bold mb-1">START SCRIPT (Editable):</div>
+                                        <textarea 
+                                            id="start-script-${session.sessionId}"
+                                            class="w-full bg-white p-3 rounded border text-xs font-mono leading-relaxed"
+                                            rows="25"
+                                            style="white-space: pre; overflow-x: auto;"
+                                            onclick="event.stopPropagation()"
+                                        >${session.customStartScript || generateSessionSetupScript(session)}</textarea>
                                     </div>
                                     
-                                    <button onclick="event.stopPropagation(); copyStartPrompt('${session.sessionId}')" 
-                                        class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs">
-                                        Copy Commands
-                                    </button>
+                                    <div class="flex gap-2">
+                                        <button onclick="event.stopPropagation(); copyStartPrompt('${session.sessionId}')" 
+                                            class="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs">
+                                            Copy Script
+                                        </button>
+                                        <button onclick="event.stopPropagation(); saveStartScript('${session.sessionId}')" 
+                                            class="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-xs">
+                                            Save Edits
+                                        </button>
+                                        <button onclick="event.stopPropagation(); resetStartScript('${session.sessionId}')" 
+                                            class="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs">
+                                            Reset to Default
+                                        </button>
+                                    </div>
                                 </div>
                                 
                                 ${state === 'planned' ? `
@@ -332,9 +349,32 @@ function saveSessionNotes(sessionId) {
 function copyStartPrompt(sessionId) {
     const session = sessions.find(s => s.sessionId === sessionId);
     if (session) {
-        const prompt = generateSessionSetupScript(session);
+        // Get the edited content from textarea or use the saved custom script
+        const scriptElement = document.getElementById(`start-script-${sessionId}`);
+        const prompt = scriptElement ? scriptElement.value : (session.customStartScript || generateSessionSetupScript(session));
         navigator.clipboard.writeText(prompt);
-        alert('Start script with sprint items copied to clipboard!');
+        alert('Start script copied to clipboard!');
+    }
+}
+
+function saveStartScript(sessionId) {
+    const session = sessions.find(s => s.sessionId === sessionId);
+    const scriptElement = document.getElementById(`start-script-${sessionId}`);
+    if (session && scriptElement) {
+        session.customStartScript = scriptElement.value;
+        // Optionally save to server
+        alert('Start script saved!');
+    }
+}
+
+function resetStartScript(sessionId) {
+    const session = sessions.find(s => s.sessionId === sessionId);
+    const scriptElement = document.getElementById(`start-script-${sessionId}`);
+    if (session && scriptElement) {
+        const defaultScript = generateSessionSetupScript(session);
+        scriptElement.value = defaultScript;
+        session.customStartScript = null;
+        alert('Start script reset to default!');
     }
 }
 
@@ -463,17 +503,38 @@ ${sprintItems.filter(i => i.status !== 'new').map(i => `- [${i.id}] ${i.title}`)
 ⚠️ Session abandoned - items returned to backlog`;
     }
     
+    // Store the generated prompt for this outcome
+    if (!session.closeScripts) session.closeScripts = {};
+    session.closeScripts[outcome] = prompt;
+    
     // Display the prompt in the UI
     const scriptDiv = document.getElementById(`closeScript-${sessionId}`);
     if (scriptDiv) {
         scriptDiv.classList.remove('hidden');
         scriptDiv.innerHTML = `
             <div class="border rounded p-3 mt-3 bg-gray-50">
-                <pre class="bg-white p-3 rounded border text-xs leading-relaxed overflow-x-auto" style="white-space: pre-wrap; word-wrap: break-word;">${prompt}</pre>
-                <button onclick="navigator.clipboard.writeText(\`${prompt.replace(/`/g, '\\`')}\`); alert('Closing instructions copied!');" 
-                    class="mt-2 px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
-                    Copy Instructions
-                </button>
+                <div class="font-bold text-xs mb-2">CLOSE SCRIPT (Editable):</div>
+                <textarea 
+                    id="close-script-${sessionId}-${outcome}"
+                    class="w-full bg-white p-3 rounded border text-xs font-mono leading-relaxed"
+                    rows="20"
+                    style="white-space: pre; overflow-x: auto;"
+                    onclick="event.stopPropagation()"
+                >${session.customCloseScripts?.[outcome] || prompt}</textarea>
+                <div class="flex gap-2 mt-2">
+                    <button onclick="copyCloseScript('${sessionId}', '${outcome}'); event.stopPropagation();" 
+                        class="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Copy Script
+                    </button>
+                    <button onclick="saveCloseScript('${sessionId}', '${outcome}'); event.stopPropagation();" 
+                        class="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600">
+                        Save Edits
+                    </button>
+                    <button onclick="resetCloseScript('${sessionId}', '${outcome}'); event.stopPropagation();" 
+                        class="px-3 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600">
+                        Reset to Default
+                    </button>
+                </div>
             </div>
         `;
     }
@@ -733,12 +794,51 @@ ${completionType !== 'ABANDON' ? '- Push branch' : '- Discard changes'}`;
 }
 
 // Export the new enhanced function
+// New functions for close script management
+function copyCloseScript(sessionId, outcome) {
+    const session = sessions.find(s => s.sessionId === sessionId);
+    if (session) {
+        const scriptElement = document.getElementById(`close-script-${sessionId}-${outcome}`);
+        const script = scriptElement ? scriptElement.value : 
+                      (session.customCloseScripts?.[outcome] || session.closeScripts?.[outcome] || '');
+        navigator.clipboard.writeText(script);
+        alert('Close script copied to clipboard!');
+    }
+}
+
+function saveCloseScript(sessionId, outcome) {
+    const session = sessions.find(s => s.sessionId === sessionId);
+    const scriptElement = document.getElementById(`close-script-${sessionId}-${outcome}`);
+    if (session && scriptElement) {
+        if (!session.customCloseScripts) session.customCloseScripts = {};
+        session.customCloseScripts[outcome] = scriptElement.value;
+        alert('Close script saved!');
+    }
+}
+
+function resetCloseScript(sessionId, outcome) {
+    const session = sessions.find(s => s.sessionId === sessionId);
+    const scriptElement = document.getElementById(`close-script-${sessionId}-${outcome}`);
+    if (session && scriptElement && session.closeScripts?.[outcome]) {
+        scriptElement.value = session.closeScripts[outcome];
+        if (session.customCloseScripts) {
+            delete session.customCloseScripts[outcome];
+        }
+        alert('Close script reset to default!');
+    }
+}
+
 window.renderEnhancedSessionCardWithTabs = renderEnhancedSessionCardWithTabs;
 window.showSessionTab = showSessionTab;
 window.saveSessionNotes = saveSessionNotes;
 window.copyStartPrompt = copyStartPrompt;
+window.saveStartScript = saveStartScript;
+window.resetStartScript = resetStartScript;
 window.copyCommand = copyCommand;
 window.generateCloseScript = generateCloseScript;
+window.copyCloseScript = copyCloseScript;
+window.saveCloseScript = saveCloseScript;
+window.resetCloseScript = resetCloseScript;
 window.copyScript = copyScript;
 window.markSessionStarted = markSessionStarted;
 window.runVerification = runVerification;
