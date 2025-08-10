@@ -424,6 +424,26 @@ function generateCloseScript(sessionId, outcome) {
     session.closureType = outcome.toUpperCase();
     session.lastCloseAction = outcome.toUpperCase();
     
+    // Update session state when close script is generated
+    if (outcome === 'complete') {
+        session.state = 'completed';
+    } else if (outcome === 'abandon') {
+        session.state = 'abandoned';
+    } else if (outcome === 'wip') {
+        session.state = 'paused';
+    }
+    session.closedAt = new Date().toISOString();
+    
+    // Calculate duration if we have a start time
+    if (session.startedAt) {
+        const start = new Date(session.startedAt);
+        const end = new Date(session.closedAt);
+        const minutes = Math.round((end - start) / 60000);
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        session.duration = `${hours}h ${mins}m`;
+    }
+    
     const sprintName = session.sprintName || session.sprint;
     const worktreeName = session.worktreeName || session.worktree || 'main';
     // Try to get ports from worktree config, but allow defaults for non-worktree sessions
