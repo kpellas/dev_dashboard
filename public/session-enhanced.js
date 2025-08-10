@@ -10,7 +10,7 @@ function generateSessionSetupScript(session) {
     const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
     
     const sprintItems = ideas?.items?.filter(item => 
-        item.sprint === sprintName
+        item.sprint === sprintName && item.status !== 'done'
     ) || [];
     
     return `#!/bin/bash
@@ -48,11 +48,17 @@ npm install
 # Setup git branch
 git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
 
+# Check git status
+echo "Checking git status..."
+git status --short
+
 # Clear ports
-lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null
-lsof -ti:$BACKEND_PORT | xargs kill -9 2>/dev/null
+echo "Clearing ports if in use..."
+lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null || true
+lsof -ti:$BACKEND_PORT | xargs kill -9 2>/dev/null || true
 
 # Start servers
+echo "Starting servers..."
 npm run dev -- --port $FRONTEND_PORT > frontend.log 2>&1 &
 FRONTEND_PID=$!
 
@@ -60,20 +66,40 @@ PORT=$BACKEND_PORT npm run server > backend.log 2>&1 &
 BACKEND_PID=$!
 
 # Verify
-sleep 3
-echo "✅ Frontend PID: $FRONTEND_PID on port $FRONTEND_PORT"
-echo "✅ Backend PID: $BACKEND_PID on port $BACKEND_PORT"
-echo "📊 Dashboard: http://localhost:$FRONTEND_PORT"
+sleep 5
+if kill -0 $FRONTEND_PID 2>/dev/null; then
+    echo "✅ Frontend running: http://localhost:$FRONTEND_PORT (PID: $FRONTEND_PID)"
+else
+    echo "❌ Frontend failed - check frontend.log"
+fi
+
+if kill -0 $BACKEND_PID 2>/dev/null; then
+    echo "✅ Backend running: http://localhost:$BACKEND_PORT (PID: $BACKEND_PID)"
+else
+    echo "❌ Backend failed - check backend.log"
+fi
 
 # ============================================
 # SPRINT ITEMS TO COMPLETE
 # ============================================
 
-${sprintItems.map((item, i) => `
+${sprintItems.map((item, i) => {
+    let itemText = `
 # ${i + 1}. [${item.id}] ${item.title} (${item.priority})
 #    ${item.description ? item.description.replace(/\n/g, '\n#    ') : 'No description'}
-#    Status: ${item.status}
-`).join('')}
+#    Status: ${item.status}`;
+    
+    if (item.comments && item.comments.length > 0) {
+        itemText += `\n#    Comments (${item.comments.length}):`;
+        item.comments.forEach((comment, idx) => {
+            const date = new Date(comment.timestamp).toLocaleString();
+            const text = comment.text.replace(/\n/g, '\n#        ');
+            itemText += `\n#      [${date}] ${text}`;
+        });
+    }
+    
+    return itemText + '\n';
+}).join('')}
 
 # ============================================
 # WORKFLOW
@@ -82,7 +108,7 @@ ${sprintItems.map((item, i) => `
 # 2. Ensure you’re in the right git and worktree
 # 3. Start the server on correct front ended back up report.
 # 4. Update status in Ideas & Issues tab as you work with comments and change status.
-# 5. You will be prompted with a close session prompt when the session is done. This will include details about git, worktree hygiene, et.c.`;
+# 5. You will be prompted with a close session prompt when the session is done. This will include details about git, worktree hygiene, etc.`;
 }
 
 function renderEnhancedSessionCardWithTabs(session) {
@@ -396,7 +422,7 @@ function generateCloseScript(sessionId, outcome) {
     const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
     const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
     const sprintItems = ideas?.items?.filter(item => 
-        item.sprint === sprintName
+        item.sprint === sprintName && item.status !== 'done'
     ) || [];
     
     const completedItems = sprintItems.filter(i => i.status === 'done');
@@ -614,7 +640,7 @@ function copyScript(scriptType, sessionId) {
     const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
     const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
     const sprintItems = ideas?.items?.filter(item => 
-        item.sprint === sprintName
+        item.sprint === sprintName && item.status !== 'done'
     ) || [];
     
     let script = '';

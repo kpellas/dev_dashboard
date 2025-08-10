@@ -45,6 +45,8 @@ const SESSION_CHECKLIST = {
     ]
 };
 
+// Removed - using generateSessionSetupScript from session-enhanced.js instead
+/*
 function generateSessionStartPrompt(session, project, worktree) {
     // Get actual sprint items from ideas
     const sprintItems = ideas.items?.filter(item => 
@@ -142,6 +144,7 @@ Record important decisions, blockers, and progress here:
 *Session started: ${new Date().toISOString()}*
 `;
 }
+*/
 
 function generateSessionClosePrompt(session, closureType) {
     // Get actual sprint items and their current status
@@ -491,21 +494,7 @@ async function startSession(sessionId) {
     const session = sessions.find(s => s.sessionId === sessionId);
     if (!session) return;
     
-    // Generate start prompt
-    const project = projects[activeProject];
-    const worktree = worktrees.find(w => w.name === session.worktreeName);
-    const prompt = generateSessionStartPrompt(session, project, worktree);
-    
-    // Save prompt
-    await fetch('/api/session-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            sessionId: sessionId,
-            promptType: 'start',
-            content: prompt
-        })
-    });
+    // Session start - script will be generated in session-enhanced.js
     
     // Update session state
     session.state = SESSION_STATES.STARTED;
