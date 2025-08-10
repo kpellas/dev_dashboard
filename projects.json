@@ -1,0 +1,96 @@
+{
+  "projects": {
+    "moseymail": {
+      "id": "moseymail",
+      "name": "MoseyMail",
+      "description": "Email management system with container philosophy",
+      "path": "/Users/kellypellas/DevProjects/moseymail",
+      "repository": "moseymail",
+      "primaryColor": "#3B82F6",
+      "icon": "MAIL",
+      "settings": {
+        "apiPort": 3001,
+        "frontendPort": 5173,
+        "gitEnabled": true,
+        "worktreesEnabled": true,
+        "devCommand": "npm run dev",
+        "testCommand": "npm test",
+        "lintCommand": "npm run lint"
+      },
+      "files": {
+        "ideas": ".ideas.json",
+        "claude": "CLAUDE.md",
+        "currentState": "CURRENT_STATE.md"
+      },
+      "createdAt": "2025-08-06T10:00:00Z",
+      "lastAccessed": "2025-08-09T23:11:52.780Z"
+    },
+    "asterick": {
+      "id": "asterick",
+      "name": "Asterick",
+      "description": "like facebook but before it sucked.",
+      "path": "/Users/kellypellas/DevProjects/asterick",
+      "repository": "asterick",
+      "primaryColor": "#10B981",
+      "icon": "STAR",
+      "settings": {
+        "apiPort": 3002,
+        "frontendPort": 5174,
+        "gitEnabled": true,
+        "worktreesEnabled": true,
+        "devCommand": "npm run dev",
+        "testCommand": "npm test",
+        "lintCommand": "npm run lint"
+      },
+      "files": {
+        "ideas": ".ideas.json",
+        "claude": null,
+        "currentState": null
+      },
+      "createdAt": "2025-08-09T01:58:42.191Z",
+      "lastAccessed": "2025-08-09T23:38:39.040Z"
+    },
+    "dev-dashboard": {
+      "id": "dev-dashboard",
+      "name": "Dev Dashboard",
+      "description": "Dev Dashboard project",
+      "path": "/Users/kellypellas/DevProjects/dev-dashboard",
+      "repository": "dev-dashboard",
+      "primaryColor": "#3B82F6",
+      "icon": "CODE",
+      "settings": {
+        "apiPort": 3003,
+        "frontendPort": 5175,
+        "gitEnabled": false,
+        "worktreesEnabled": false,
+        "devCommand": "npm run dev",
+        "testCommand": "npm test",
+        "lintCommand": "npm run lint"
+      },
+      "files": {
+        "ideas": ".ideas.json",
+        "claude": null,
+        "currentState": null
+      },
+      "createdAt": "2025-08-09T23:09:43.452Z",
+      "lastAccessed": "2025-08-09T23:42:20.343Z"
+    }
+  },
+  "activeProject": "dev-dashboard",
+  "dashboardSettings": {
+    "port": 9000,
+    "autoSelectLastProject": true,
+    "showProjectSelector": true,
+    "sessionPrefix": "DS",
+    "portRanges": {
+      "frontend": [
+        5173,
+        5190
+      ],
+      "backend": [
+        3001,
+        3020
+      ]
+    }
+  }
+}

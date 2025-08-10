@@ -776,12 +776,15 @@ echo "✅ Abandon complete"`;
         scriptDiv.classList.remove('hidden');
         scriptDiv.innerHTML = `
             <div class="border rounded p-3 mt-3 bg-gray-50">
-                <div class="font-bold text-xs mb-2">CLOSE SCRIPT (Editable):</div>
+                <h4 class="font-semibold text-sm mb-2 text-black">
+                    ${outcome === 'wip' ? '🔄 Work in Progress' : outcome === 'complete' ? '✅ Complete & Merge' : '❌ Abandon'} Close Script
+                </h4>
+                <p class="text-xs text-gray-600 mb-2">Copy this script and run it in your terminal to close the session:</p>
                 <textarea 
                     id="close-script-${sessionId}-${outcome}"
-                    class="w-full bg-white p-3 rounded border text-xs font-mono leading-relaxed"
+                    class="w-full bg-white text-black p-3 rounded border border-gray-300 text-xs font-mono leading-relaxed"
                     rows="20"
-                    style="white-space: pre; overflow-x: auto;"
+                    style="white-space: pre; overflow-x: auto; color: black;"
                     onclick="event.stopPropagation()"
                 >${session.customCloseScripts?.[outcome] || prompt}</textarea>
                 <div class="flex gap-2 mt-2">
