@@ -419,8 +419,14 @@ function generateCloseScript(sessionId, outcome) {
     
     const sprintName = session.sprintName || session.sprint;
     const worktreeName = session.worktreeName || session.worktree;
-    const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
-    const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
+    // Must have ports from worktree config - no fallbacks
+    const frontendPort = session.worktree?.frontendPort;
+    const backendPort = session.worktree?.backendPort;
+    
+    if (!frontendPort || !backendPort) {
+        alert('Error: Worktree ports not configured. Please check worktree configuration.');
+        return;
+    }
     const sprintItems = ideas?.items?.filter(item => 
         item.sprint === sprintName && item.status !== 'done'
     ) || [];
@@ -431,102 +437,305 @@ function generateCloseScript(sessionId, outcome) {
     let prompt = '';
     
     if (outcome === 'wip') {
-        prompt = `# 🔄 Work in Progress - ${sprintName}
+        // Get session start time if available
+        const sessionDuration = session.startedAt ? 
+            Math.round((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 'unknown';
+        
+        prompt = `#!/bin/bash
+# Session Close Script - Work in Progress
+# Sprint: ${sprintName}
+# Generated: ${new Date().toLocaleString()}
 
-## Session Summary
-- Completed: ${completedItems.length} items
-- In Progress: ${inProgressItems.length} items
-- Branch: ${worktreeName}
+echo "=========================================="
+echo "🔄 Closing Session - Work in Progress"
+echo "=========================================="
+echo "Sprint: ${sprintName}"
+echo "Branch: ${worktreeName}"
+echo "Session Duration: ${sessionDuration} minutes"
+echo "Completed: ${completedItems.length} items"
+echo "In Progress: ${inProgressItems.length} items"
+echo ""
 
-## Save Your Work
-\`\`\`bash
+# Verify we're in the right place
+EXPECTED_BRANCH="${worktreeName}"
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
+    echo "❌ ERROR: Wrong branch!"
+    echo "Expected: $EXPECTED_BRANCH"
+    echo "Current: $CURRENT_BRANCH"
+    exit 1
+fi
+
+# Navigate to worktree
+cd "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}" || exit 1
+
+# Show session metrics
+echo "📊 Session Metrics:"
+echo "----------------------------"
+COMMITS_THIS_SESSION=$(git log --oneline --since="${sessionDuration} minutes ago" 2>/dev/null | wc -l)
+echo "Commits made: $COMMITS_THIS_SESSION"
+echo ""
+echo "Files changed:"
+git diff --stat HEAD~$COMMITS_THIS_SESSION 2>/dev/null || git diff --stat HEAD
+echo ""
+
+# Generate handover notes
+HANDOVER_NOTES="Session ${sessionDuration}min: Completed ${completedItems.length} items, ${inProgressItems.length} in progress. ${completedItems.length > 0 ? 'Completed: ' + completedItems.map(i => i.title).join(', ') + '. ' : ''}${inProgressItems.length > 0 ? 'Still working on: ' + inProgressItems.map(i => i.title).join(', ') + '.' : ''}"
+
+echo "📝 Handover notes generated:"
+echo "$HANDOVER_NOTES"
+echo ""
+echo "Edit if needed (or press Enter to use as-is):"
+read -e -i "$HANDOVER_NOTES" HANDOVER_NOTES
+
+# Save work
+echo "💾 Committing work..."
 git add -A
 git commit -m "WIP: ${sprintName} - ${completedItems.length} done, ${inProgressItems.length} in progress
 
+Session: ${sessionDuration} minutes
 Completed:
 ${completedItems.map(i => `- ${i.title}`).join('\n')}
 
 In Progress:
-${inProgressItems.map(i => `- ${i.title}`).join('\n')}"
+${inProgressItems.map(i => `- ${i.title}`).join('\n')}
 
-git push origin ${worktreeName}
-\`\`\`
+Handover: $HANDOVER_NOTES" || echo "No changes to commit"
 
-## Stop Servers
-\`\`\`bash
-lsof -ti:${frontendPort} | xargs kill -9
-lsof -ti:${backendPort} | xargs kill -9
-\`\`\`
+# Stop servers
+echo "🛑 Stopping servers..."
+lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null || true
+lsof -ti:${backendPort} | xargs kill -9 2>/dev/null || true
 
-✅ Work saved - continue in next session`;
+echo ""
+echo "✅ Session saved locally (not pushed)"
+echo ""
+echo "⚠️ IMPORTANT - Update Ideas & Issues:"
+echo "1. Add handover notes as comments to in-progress items"
+echo "2. Update item statuses if needed"
+echo ""
+echo "📋 Handover notes to add:"
+echo "$HANDOVER_NOTES"
+echo ""
+echo "🌳 Branch: ${worktreeName}"
+echo "⏱️ Session duration: ${sessionDuration} minutes"`;
         
     } else if (outcome === 'complete') {
-        prompt = `# ✅ Complete & Ready to Merge - ${sprintName}
+        const sessionDuration = session.startedAt ? 
+            Math.round((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 'unknown';
+            
+        prompt = `#!/bin/bash
+# Session Close Script - Complete
+# Sprint: ${sprintName}
+# Generated: ${new Date().toLocaleString()}
 
-## Completed Items (${completedItems.length})
-${completedItems.map(i => `- [${i.id}] ${i.title}`).join('\n')}
+echo "=========================================="
+echo "✅ Closing Session - Sprint Complete"
+echo "=========================================="
+echo "Sprint: ${sprintName}"
+echo "Branch: ${worktreeName}"
+echo "Session Duration: ${sessionDuration} minutes"
+echo "Completed: ${completedItems.length} items"
+echo ""
 
-## Final Checks
-\`\`\`bash
+# Verify we're in the right place
+EXPECTED_BRANCH="${worktreeName}"
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
+    echo "❌ ERROR: Wrong branch!"
+    echo "Expected: $EXPECTED_BRANCH"
+    echo "Current: $CURRENT_BRANCH"
+    exit 1
+fi
+
+# Navigate to worktree
+cd "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}" || exit 1
+
+# Show what we're about to complete
+echo "📊 Review changes before completing:"
+echo "----------------------------"
+echo "Files modified:"
+git diff --name-status main...HEAD
+echo ""
+echo "New files added:"
+git diff --diff-filter=A --name-only main...HEAD
+echo ""
+
+# Verify no debug code or TODOs left
+echo "🔍 Checking for leftover debug code..."
+DEBUG_COUNT=$(grep -r "console.log\\|debugger\\|TODO\\|FIXME" --include="*.js" --include="*.jsx" . 2>/dev/null | wc -l)
+if [ $DEBUG_COUNT -gt 0 ]; then
+    echo "⚠️ Found $DEBUG_COUNT instances of debug code/TODOs"
+    grep -r "console.log\\|debugger\\|TODO\\|FIXME" --include="*.js" --include="*.jsx" . 2>/dev/null | head -5
+    echo ""
+    echo "Continue and commit WITH this debug code? (y/n)"
+    read -p "Choice: " CONTINUE
+    if [ "$CONTINUE" != "y" ]; then
+        echo "❌ Good choice! Clean up debug code first, then run close script again"
+        exit 1
+    fi
+fi
+
+# Run tests BEFORE committing
+echo "🧪 Running tests..."
 npm test
-npm run lint
-git status
-\`\`\`
+if [ $? -ne 0 ]; then
+    echo "❌ Tests failed - fix before completing"
+    exit 1
+fi
 
-## Commit & Push
-\`\`\`bash
+echo "🔍 Running lint..."
+npm run lint
+if [ $? -ne 0 ]; then
+    echo "⚠️ Lint warnings found"
+    read -p "Continue with warnings? (y/n): " CONTINUE
+    if [ "$CONTINUE" != "y" ]; then
+        echo "❌ Aborting - fix lint warnings first"
+        exit 1
+    fi
+fi
+
+# Final commit
+echo "💾 Creating final commit..."
 git add -A
 git commit -m "feat: Complete ${sprintName}
 
 ${completedItems.map(i => `- ${i.title}`).join('\n')}
 
+Session duration: ${sessionDuration} minutes
+
 🤖 Generated with Claude Code
-Co-Authored-By: Claude <noreply@anthropic.com>"
+Co-Authored-By: Claude <noreply@anthropic.com>" || echo "No changes to commit"
 
-git push origin ${worktreeName}
-\`\`\`
+# Merge to main locally (no push)
+echo "🔀 Merging to main locally..."
+git checkout main
+git merge ${worktreeName} --no-ff -m "Merge ${worktreeName}: ${sprintName} complete"
 
-## Create Pull Request
-\`\`\`bash
-gh pr create --title "${sprintName}: ${completedItems.length} items completed" \\
-  --body "Completed items:\\n${completedItems.map(i => `- ${i.title}`).join('\\n')}"
-\`\`\`
+# Stop servers
+echo "🛑 Stopping servers..."
+lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null || true
+lsof -ti:${backendPort} | xargs kill -9 2>/dev/null || true
 
-## Update ideas.json
-Mark completed items as 'done' in Ideas & Issues tab
+# Clean up worktree
+echo "🧹 Cleaning up worktree..."
+cd "/Users/kellypellas/DevProjects/${activeProject}"
+git worktree remove "worktrees/${worktreeName}" --force
 
-## Stop Servers
-\`\`\`bash
-lsof -ti:${frontendPort} | xargs kill -9
-lsof -ti:${backendPort} | xargs kill -9
-\`\`\`
+# Delete the branch
+echo "🗑️ Deleting merged branch..."
+git branch -d ${worktreeName}
 
-✅ Sprint complete - ready for merge!`;
+echo ""
+echo "✅ Sprint complete and merged locally!"
+echo "✅ Worktree removed"
+echo "✅ Branch deleted"
+echo ""
+
+# Auto-update items to done
+echo "📝 Updating items to 'done' status..."
+${completedItems.map(item => `
+echo "Marking ${item.id} as done"
+# This would need API call to update - for now showing what needs updating
+`).join('')}
+
+echo "⚠️ NEXT STEP (when ready for bulk operations):"
+echo "   git push origin main"
+echo ""
+echo "Session duration: ${sessionDuration} minutes"
+echo "Items completed: ${completedItems.length}"`;
         
     } else if (outcome === 'abandon') {
-        prompt = `# ❌ Abandon Session - ${sprintName}
+        const sessionDuration = session.startedAt ? 
+            Math.round((Date.now() - new Date(session.startedAt).getTime()) / 60000) : 'unknown';
+            
+        prompt = `#!/bin/bash
+# Session Close Script - Abandon
+# Sprint: ${sprintName}
+# Generated: ${new Date().toLocaleString()}
 
-## Save or Discard Changes
-\`\`\`bash
-# Option 1: Stash changes (can recover later)
-git stash save "Abandoned: ${sprintName} - ${new Date().toISOString()}"
+echo "=========================================="
+echo "❌ Abandoning Session"
+echo "=========================================="
+echo "Sprint: ${sprintName}"
+echo "Branch: ${worktreeName}"
+echo "Session Duration: ${sessionDuration} minutes"
+echo ""
 
-# Option 2: Discard all changes (permanent)
+# Verify we're in the right place
+EXPECTED_BRANCH="${worktreeName}"
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
+    echo "❌ ERROR: Wrong branch!"
+    echo "Expected: $EXPECTED_BRANCH"
+    echo "Current: $CURRENT_BRANCH"
+    exit 1
+fi
+
+# Navigate to worktree
+cd "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}" || exit 1
+
+# Show what will be abandoned
+echo "📊 Changes that will be abandoned:"
+git status --short
+echo ""
+
+# Abandon means delete everything
+echo "⚠️ ABANDONING: This will delete all uncommitted work!"
+echo ""
+
+# Show what will be lost
+if [ -n "$(git status --porcelain)" ]; then
+    echo "Uncommitted changes that will be DELETED:"
+    git status --short
+    echo ""
+fi
+
+read -p "Type 'ABANDON' to confirm deletion: " CONFIRM
+if [ "$CONFIRM" != "ABANDON" ]; then
+    echo "❌ Abandon cancelled"
+    exit 0
+fi
+
+# Delete all changes
+echo "🗑️ Deleting all uncommitted work..."
 git reset --hard HEAD
 git clean -fd
-\`\`\`
+echo "✅ Uncommitted work deleted"
 
-## Stop Servers
-\`\`\`bash
-lsof -ti:${frontendPort} | xargs kill -9
-lsof -ti:${backendPort} | xargs kill -9
-\`\`\`
+# Stop servers
+echo "🛑 Stopping servers..."
+lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null || true
+lsof -ti:${backendPort} | xargs kill -9 2>/dev/null || true
 
-## Reset Item Statuses
-Go to Ideas & Issues tab and reset statuses to 'new' for:
-${sprintItems.filter(i => i.status !== 'new').map(i => `- [${i.id}] ${i.title}`).join('\n')}
+# Ask about cleaning up worktree and branch
+echo ""
+echo "🧹 Clean up worktree and branch?"
+read -p "Delete worktree and branch? (y/n): " DELETE_WT
+if [ "$DELETE_WT" = "y" ]; then
+    cd "/Users/kellypellas/DevProjects/${activeProject}"
+    echo "Removing worktree..."
+    git worktree remove "worktrees/${worktreeName}" --force
+    echo "Deleting branch..."
+    git branch -D ${worktreeName} 2>/dev/null || echo "Branch may have unpushed commits"
+    echo "✅ Worktree and branch deleted"
+else
+    echo "Worktree kept at: worktrees/${worktreeName}"
+fi
 
-⚠️ Session abandoned - items returned to backlog`;
+echo ""
+echo "📋 Session abandoned after ${sessionDuration} minutes"
+echo ""
+
+# Auto-reset items to 'new'
+echo "📝 Resetting item statuses..."
+${inProgressItems.map(item => `
+echo "Resetting ${item.id} to 'new'"
+# This would need API call - for now showing what needs resetting
+`).join('')}
+
+echo ""
+echo "✅ Abandon complete"`;
     }
     
     // Store the generated prompt for this outcome

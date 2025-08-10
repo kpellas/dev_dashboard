@@ -524,20 +524,7 @@ async function closeSession(sessionId, closureType) {
     const session = sessions.find(s => s.sessionId === sessionId);
     if (!session) return;
     
-    // Generate close prompt
-    const completedItems = session.items?.filter(i => i.status === 'done') || [];
-    const prompt = generateSessionClosePrompt(session, completedItems, session.notes);
-    
-    // Save close prompt
-    await fetch('/api/session-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            sessionId: sessionId,
-            promptType: 'close',
-            content: prompt
-        })
-    });
+    // Close script will be generated via generateCloseScript in session-enhanced.js
     
     // Update session
     session.state = SESSION_STATES.COMPLETED;
