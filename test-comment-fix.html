@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Comment Fix</title>
+</head>
+<body>
+    <h1>Testing Comment Feature Fix</h1>
+    <p>Testing if window.activeProject is properly checked before API calls</p>
+    
+    <script>
+        // Test 1: Check if activeProject is undefined
+        console.log('Test 1: activeProject is:', window.activeProject);
+        
+        // Test 2: Set activeProject and verify
+        window.activeProject = 'asterick';
+        console.log('Test 2: activeProject set to:', window.activeProject);
+        
+        // Test 3: Simulate API call with activeProject
+        async function testAPI() {
+            if (!window.activeProject) {
+                console.error('ERROR: No active project selected');
+                return;
+            }
+            
+            console.log('SUCCESS: Would call API at:', `/api/projects/${window.activeProject}/ideas`);
+            
+            // Actually test the endpoint
+            try {
+                const response = await fetch(`http://localhost:9000/api/projects/${window.activeProject}/ideas`);
+                const data = await response.json();
+                console.log('API Response:', data);
+                
+                if (data.items && Array.isArray(data.items)) {
+                    console.log('Found', data.items.length, 'items in .ideas.json');
+                    
+                    // Find an item with ID 1 to test comment addition
+                    const testItem = data.items.find(item => item.id === 1);
+                    if (testItem) {
+                        console.log('Test item found:', testItem.title);
+                        console.log('Current comments:', testItem.comments ? testItem.comments.length : 0);
+                    }
+                }
+            } catch (error) {
+                console.error('API Error:', error);
+            }
+        }
+        
+        // Run the test
+        testAPI();
+        
+        // Test 4: Test without activeProject
+        window.activeProject = null;
+        console.log('\nTest 4: Testing with null activeProject...');
+        testAPI();
+    </script>
+    
+    <div style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;">
+        <h2>Test Results:</h2>
+        <p>Check the browser console for test results</p>
+        <p>Expected behavior:</p>
+        <ul>
+            <li>API calls should check for window.activeProject</li>
+            <li>Should show error if activeProject is not set</li>
+            <li>Should successfully call API when activeProject is set</li>
+        </ul>
+    </div>
+</body>
+</html>

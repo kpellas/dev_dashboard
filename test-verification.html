@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Verification System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-2xl font-bold mb-6">Verification System Test</h1>
+        
+        <div class="space-y-4">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h2 class="text-lg font-semibold mb-4">Test Session</h2>
+                <div id="test-info" class="text-sm text-gray-600 mb-4"></div>
+                
+                <div class="grid grid-cols-3 gap-4">
+                    <button onclick="testWIPVerification()" 
+                        class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+                        Test WIP Verification
+                    </button>
+                    <button onclick="testCompleteVerification()" 
+                        class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600">
+                        Test Complete Verification
+                    </button>
+                    <button onclick="testAbandonVerification()" 
+                        class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">
+                        Test Abandon Verification
+                    </button>
+                </div>
+            </div>
+            
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h2 class="text-lg font-semibold mb-4">Expected Checks</h2>
+                <div class="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                        <h3 class="font-semibold text-blue-600 mb-2">WIP</h3>
+                        <ul class="space-y-1">
+                            <li>✓ Servers stopped</li>
+                            <li>✓ Changes committed</li>
+                            <li>✓ Handover notes added</li>
+                            <li>✓ Worktree preserved</li>
+                            <li>✓ Branch preserved</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-green-600 mb-2">Complete</h3>
+                        <ul class="space-y-1">
+                            <li>✓ Servers stopped</li>
+                            <li>✓ All items marked done</li>
+                            <li>✓ Changes committed</li>
+                            <li>✓ Branch merged to main</li>
+                            <li>✓ Worktree removed</li>
+                            <li>✓ Branch deleted</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h3 class="font-semibold text-red-600 mb-2">Abandon</h3>
+                        <ul class="space-y-1">
+                            <li>✓ Servers stopped</li>
+                            <li>✓ Items reset to new</li>
+                            <li>✓ Work deleted/stashed</li>
+                            <li>✓ Worktree removed</li>
+                            <li>✓ Branch deleted</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Mock session data for testing
+        const mockSession = {
+            sessionId: 'TEST-001',
+            projectId: 'test-project',
+            sprintName: 'test-sprint',
+            worktreeName: 'test-worktree',
+            worktree: {
+                frontendPort: 5174,
+                backendPort: 3002
+            },
+            startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour ago
+            items: 5
+        };
+
+        // Mock global variables
+        window.sessions = [mockSession];
+        window.activeProject = 'test-project';
+        window.ideas = {
+            items: [
+                { id: '1', title: 'Task 1', sprint: 'test-sprint', status: 'done' },
+                { id: '2', title: 'Task 2', sprint: 'test-sprint', status: 'done' },
+                { id: '3', title: 'Task 3', sprint: 'test-sprint', status: 'in_progress', 
+                  comments: [{ text: 'Handover: Still working on database integration' }] },
+                { id: '4', title: 'Task 4', sprint: 'test-sprint', status: 'in_progress' },
+                { id: '5', title: 'Task 5', sprint: 'test-sprint', status: 'new' }
+            ]
+        };
+
+        // Update test info
+        document.getElementById('test-info').innerHTML = `
+            Session ID: ${mockSession.sessionId}<br>
+            Sprint: ${mockSession.sprintName}<br>
+            Worktree: ${mockSession.worktreeName}<br>
+            Ports: Frontend ${mockSession.worktree.frontendPort}, Backend ${mockSession.worktree.backendPort}
+        `;
+
+        async function testWIPVerification() {
+            console.log('Testing WIP verification...');
+            mockSession.closureType = 'WIP';
+            mockSession.closedAt = new Date().toISOString();
+            
+            if (window.runAutomatedVerification) {
+                await window.runAutomatedVerification(mockSession.sessionId, 'WIP');
+            } else {
+                alert('Verification system not loaded. Please include session-auto-verify.js');
+            }
+        }
+
+        async function testCompleteVerification() {
+            console.log('Testing Complete verification...');
+            mockSession.closureType = 'COMPLETE';
+            mockSession.closedAt = new Date().toISOString();
+            
+            // Update items to all done for complete
+            window.ideas.items.forEach(item => {
+                if (item.sprint === 'test-sprint') {
+                    item.status = 'done';
+                }
+            });
+            
+            if (window.runAutomatedVerification) {
+                await window.runAutomatedVerification(mockSession.sessionId, 'COMPLETE');
+            } else {
+                alert('Verification system not loaded. Please include session-auto-verify.js');
+            }
+        }
+
+        async function testAbandonVerification() {
+            console.log('Testing Abandon verification...');
+            mockSession.closureType = 'ABANDON';
+            mockSession.closedAt = new Date().toISOString();
+            
+            // Reset items to new for abandon
+            window.ideas.items.forEach(item => {
+                if (item.sprint === 'test-sprint') {
+                    item.status = 'new';
+                }
+            });
+            
+            if (window.runAutomatedVerification) {
+                await window.runAutomatedVerification(mockSession.sessionId, 'ABANDON');
+            } else {
+                alert('Verification system not loaded. Please include session-auto-verify.js');
+            }
+        }
+    </script>
+    
+    <!-- Load verification scripts -->
+    <script src="session-auto-verify.js"></script>
+    <script src="session-verification.js"></script>
+</body>
+</html>

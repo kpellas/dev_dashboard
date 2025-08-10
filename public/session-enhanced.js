@@ -2,6 +2,11 @@
 // THIS IS THE PRIMARY SESSION CARD RENDERER USED BY THE DASHBOARD
 // It provides tabs for Overview/Start/Complete and full session management
 
+// Ensure global variables are available
+if (typeof sessions === 'undefined') window.sessions = [];
+if (typeof activeProject === 'undefined') window.activeProject = null;
+if (typeof ideas === 'undefined') window.ideas = {};
+
 // Shared function to generate session setup script
 function generateSessionSetupScript(session) {
     const sprintName = session.sprintName || session.sprint;
@@ -358,7 +363,7 @@ if (typeof window.toggleSessionExpand === 'undefined') {
 
 // Helper functions for session management
 function showSessionTab(sessionId, tabName) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (session) {
         session.activeTab = tabName;
         renderSessionsTab();
@@ -368,12 +373,14 @@ function showSessionTab(sessionId, tabName) {
 function saveSessionNotes(sessionId) {
     const notesElement = document.getElementById(`notes-${sessionId}`);
     if (notesElement) {
-        updateSessionNotes(sessionId, notesElement.value);
+        if (typeof updateSessionNotes === 'function') {
+            updateSessionNotes(sessionId, notesElement.value);
+        }
     }
 }
 
 function copyStartPrompt(sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (session) {
         // Get the edited content from textarea or use the saved custom script
         const scriptElement = document.getElementById(`start-script-${sessionId}`);
@@ -384,7 +391,7 @@ function copyStartPrompt(sessionId) {
 }
 
 function saveStartScript(sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     const scriptElement = document.getElementById(`start-script-${sessionId}`);
     if (session && scriptElement) {
         session.customStartScript = scriptElement.value;
@@ -394,7 +401,7 @@ function saveStartScript(sessionId) {
 }
 
 function resetStartScript(sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     const scriptElement = document.getElementById(`start-script-${sessionId}`);
     if (session && scriptElement) {
         const defaultScript = generateSessionSetupScript(session);
@@ -410,7 +417,7 @@ function copyCommand(command) {
 }
 
 function generateCloseScript(sessionId, outcome) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (!session) return;
     
     // Store the closure type for verification to use later
@@ -612,6 +619,23 @@ echo "🔀 Merging to main locally..."
 git checkout main
 git merge ${worktreeName} --no-ff -m "Merge ${worktreeName}: ${sprintName} complete"
 
+# Verify merge succeeded
+if [ $? -ne 0 ]; then
+    echo "❌ Merge failed! Please resolve conflicts and try again"
+    echo "Branch and worktree preserved for conflict resolution"
+    exit 1
+fi
+
+# Verify the merge actually happened
+MERGE_CHECK=$(git log --oneline -1 | grep -c "Merge ${worktreeName}")
+if [ $MERGE_CHECK -eq 0 ]; then
+    echo "❌ Merge verification failed - branch not merged to main"
+    echo "Branch and worktree preserved"
+    exit 1
+fi
+
+echo "✅ Branch successfully merged to main"
+
 # Stop servers
 echo "🛑 Stopping servers..."
 lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null || true
@@ -622,9 +646,13 @@ echo "🧹 Cleaning up worktree..."
 cd "/Users/kellypellas/DevProjects/${activeProject}"
 git worktree remove "worktrees/${worktreeName}" --force
 
-# Delete the branch
+# Delete the branch (will fail if not merged)
 echo "🗑️ Deleting merged branch..."
 git branch -d ${worktreeName}
+if [ $? -ne 0 ]; then
+    echo "⚠️ Could not delete branch with -d, it may not be fully merged"
+    echo "Use 'git branch -D ${worktreeName}' to force delete if you're sure"
+fi
 
 echo ""
 echo "✅ Sprint complete and merged locally!"
@@ -776,7 +804,7 @@ echo "✅ Abandon complete"`;
 }
 
 function runVerification(sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (!session) return;
     
     // Determine closure type - check both closureType and any recent close action
@@ -842,7 +870,7 @@ git diff HEAD~1 ideas.json
 }
 
 function copyScript(scriptType, sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (!session) return;
     
     const sprintName = session.sprintName || session.sprint;
@@ -906,7 +934,7 @@ echo "✅ Sprint ${sprintName} completed and pushed"`;
 }
 
 async function markSessionStarted(sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (session) {
         session.state = 'in_progress';
         session.startedAt = new Date().toISOString();
@@ -946,7 +974,7 @@ function updateItemStatus(sessionId, itemId, newStatus) {
 }
 
 async function completeSession(sessionId, completionType) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (!session) return;
     
     // Generate completion prompt inline
@@ -1031,7 +1059,7 @@ ${completionType !== 'ABANDON' ? '- Push branch' : '- Discard changes'}`;
 // Export the new enhanced function
 // New functions for close script management
 function copyCloseScript(sessionId, outcome) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (session) {
         const scriptElement = document.getElementById(`close-script-${sessionId}-${outcome}`);
         const script = scriptElement ? scriptElement.value : 
@@ -1042,7 +1070,7 @@ function copyCloseScript(sessionId, outcome) {
 }
 
 function saveCloseScript(sessionId, outcome) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     const scriptElement = document.getElementById(`close-script-${sessionId}-${outcome}`);
     if (session && scriptElement) {
         if (!session.customCloseScripts) session.customCloseScripts = {};
@@ -1052,7 +1080,7 @@ function saveCloseScript(sessionId, outcome) {
 }
 
 function resetCloseScript(sessionId, outcome) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     const scriptElement = document.getElementById(`close-script-${sessionId}-${outcome}`);
     if (session && scriptElement && session.closeScripts?.[outcome]) {
         scriptElement.value = session.closeScripts[outcome];
@@ -1082,7 +1110,7 @@ window.completeSession = completeSession;
 
 // Post-session verification and cleanup
 function verifySessionClosure(sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     if (!session) return null;
     
     const verification = {
@@ -1151,7 +1179,7 @@ function showPostSessionSummary(sessionId) {
     const verification = verifySessionClosure(sessionId);
     if (!verification) return;
     
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions.find(s => s.sessionId === sessionId);
     const sprintName = session?.sprintName || session?.sprint || 'Unknown Sprint';
     const worktreeName = session?.worktreeName || session?.worktree || 'Unknown Worktree';
     const frontendPort = session?.worktree?.frontendPort || session?.frontendPort || 5173;

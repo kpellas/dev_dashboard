@@ -26,9 +26,15 @@ async function performSessionHealthCheck(sessionId) {
         overall: 'healthy'
     };
     
-    // Check ports
-    const frontendPort = session.frontendPort || 5173;
-    const backendPort = session.backendPort || 3001;
+    // Check ports - must come from worktree config, no fallbacks
+    const frontendPort = session.worktree?.frontendPort;
+    const backendPort = session.worktree?.backendPort;
+    
+    if (!frontendPort || !backendPort) {
+        healthCheck.ports.error = 'Worktree ports not configured';
+        healthCheck.overall = 'error';
+        return healthCheck;
+    }
     
     healthCheck.ports.frontend = {
         port: frontendPort,
@@ -58,6 +64,22 @@ async function performSessionHealthCheck(sessionId) {
     healthCheck.items.completed = sprintItems.filter(i => i.status === 'done').length;
     healthCheck.items.inProgress = sprintItems.filter(i => i.status === 'in_progress').length;
     healthCheck.items.notStarted = sprintItems.filter(i => i.status === 'new').length;
+    
+    // Check for handover notes in WIP items
+    if (session.closureType === 'WIP' && healthCheck.items.inProgress > 0) {
+        const itemsWithHandover = sprintItems.filter(item => 
+            item.status === 'in_progress' &&
+            item.comments && item.comments.some(c => 
+                c.text && (c.text.includes('Handover:') || c.text.includes('Session') || c.text.includes('Still working on'))
+            )
+        );
+        healthCheck.items.handoverNotes = itemsWithHandover.length;
+        
+        if (itemsWithHandover.length === 0) {
+            healthCheck.issues = healthCheck.issues || [];
+            healthCheck.issues.push('WIP items missing handover notes');
+        }
+    }
     
     // Determine overall health
     if (session.closureType) {
@@ -129,6 +151,7 @@ async function runCleanupVerification() {
         if (health && health.overall !== 'healthy') {
             checks.push({
                 sessionId: session.sessionId,
+                closureType: session.closureType,
                 issues: health.issues || [],
                 ports: health.ports
             });
@@ -141,7 +164,7 @@ async function runCleanupVerification() {
     } else {
         content.innerHTML = checks.map(check => `
             <div class="border-t pt-1 mt-1">
-                <div class="font-mono text-xs font-bold">${check.sessionId}</div>
+                <div class="font-mono text-xs font-bold">${check.sessionId} ${check.closureType ? `(${check.closureType})` : ''}</div>
                 ${check.issues.map(issue => `
                     <div class="text-orange-600">⚠️ ${issue}</div>
                 `).join('')}

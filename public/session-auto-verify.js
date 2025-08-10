@@ -2,7 +2,7 @@
 // Runs actual checks after session closure to ensure everything was done properly
 
 async function runAutomatedVerification(sessionId, closureType) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions?.find(s => s.sessionId === sessionId);
     if (!session) return;
     
     console.log(`Running automated verification for session ${sessionId} (${closureType})`);
@@ -28,20 +28,35 @@ async function runAutomatedVerification(sessionId, closureType) {
         // 2. Check git status and commits
         await verifyGitStatus(session, report);
         
-        // 3. Check if ideas.json was updated
+        // 3. Track file changes during session
+        await verifyFileChanges(session, report, closureType);
+        
+        // 4. Check if ideas.json was updated
         await verifyIdeasUpdated(session, report);
         
-        // 4. Check worktree state
+        // 5. Check worktree state
         await verifyWorktreeState(session, report, closureType);
         
-        // 5. Check for test files
+        // 6. Check for test files
         await verifyTestsAdded(session, report);
         
-        // 6. Check for uncommitted changes
+        // 7. Check for uncommitted changes
         await verifyNoUncommittedChanges(session, report, closureType);
         
-        // 7. Verify branch push status
+        // 8. Verify branch push status
         await verifyBranchPushed(session, report, closureType);
+        
+        // 9. Verify branch cleanup for Complete/Abandon
+        await verifyBranchCleanup(session, report, closureType);
+        
+        // 10. Check lint results
+        await verifyLintResults(session, report, closureType);
+        
+        // 11. Track new issues added during session
+        await verifyNewIssues(session, report);
+        
+        // 12. Session summary
+        await generateSessionSummary(session, report);
         
     } catch (error) {
         report.checks.push({
@@ -70,12 +85,23 @@ async function verifyServersStopped(session, report) {
     
     try {
         // Check frontend port
-        const frontendResp = await fetch(`/api/check-port/${session.frontendPort || 5173}`);
-        const frontendData = frontendResp.ok ? await frontendResp.json() : { port: session.frontendPort || 5173, inUse: false, processCount: 0 };
+        const frontendPort = session.worktree?.frontendPort;
+        const backendPort = session.worktree?.backendPort;
+        
+        if (!frontendPort || !backendPort) {
+            check.status = 'error';
+            check.message = 'Worktree ports not configured';
+            report.failed++;
+            report.checks.push(check);
+            return;
+        }
+        
+        const frontendResp = await fetch(`/api/check-port/${frontendPort}`);
+        const frontendData = frontendResp.ok ? await frontendResp.json() : { port: frontendPort, inUse: false, processCount: 0 };
         
         // Check backend port
-        const backendResp = await fetch(`/api/check-port/${session.backendPort || 3001}`);
-        const backendData = backendResp.ok ? await backendResp.json() : { port: session.backendPort || 3001, inUse: false, processCount: 0 };
+        const backendResp = await fetch(`/api/check-port/${backendPort}`);
+        const backendData = backendResp.ok ? await backendResp.json() : { port: backendPort, inUse: false, processCount: 0 };
         
         if (frontendData.inUse) {
             check.status = 'failed';
@@ -167,6 +193,125 @@ async function verifyGitStatus(session, report) {
     report.checks.push(check);
 }
 
+async function verifyFileChanges(session, report, closureType) {
+    const check = {
+        name: 'File Changes',
+        status: 'checking',
+        details: []
+    };
+    
+    try {
+        // Get the session start time for comparison
+        const sessionStart = session.startedAt || session.created;
+        
+        // Try to get changed files from git
+        const response = await fetch(`/api/git-log?worktree=${session.worktreeName || session.worktree}&since=${sessionStart}`);
+        const data = response.ok ? await response.json() : { error: 'API not available' };
+        
+        if (data.error) {
+            // Fallback to basic git diff
+            const diffResponse = await fetch(`/api/git-diff?worktree=${session.worktreeName || session.worktree}`);
+            const diffData = diffResponse.ok ? await diffResponse.json() : { files: [] };
+            
+            if (diffData.files && diffData.files.length > 0) {
+                const addedFiles = diffData.files.filter(f => f.status === 'A' || f.status === 'new');
+                const modifiedFiles = diffData.files.filter(f => f.status === 'M' || f.status === 'modified');
+                const deletedFiles = diffData.files.filter(f => f.status === 'D' || f.status === 'deleted');
+                
+                if (addedFiles.length > 0) {
+                    check.details.push(`✨ ${addedFiles.length} new files added:`);
+                    addedFiles.forEach(f => check.details.push(`  + ${f.path || f.name}`));
+                }
+                
+                if (modifiedFiles.length > 0) {
+                    check.details.push(`📝 ${modifiedFiles.length} existing files modified:`);
+                    modifiedFiles.forEach(f => check.details.push(`  ~ ${f.path || f.name}`));
+                }
+                
+                if (deletedFiles.length > 0) {
+                    check.details.push(`🗑️ ${deletedFiles.length} files deleted:`);
+                    deletedFiles.forEach(f => check.details.push(`  - ${f.path || f.name}`));
+                }
+                
+                check.status = 'passed';
+                report.passed++;
+            } else {
+                check.details.push(`ℹ️ No file changes detected`);
+                check.status = 'info';
+            }
+        } else {
+            // Process commit data if available
+            const filesChanged = new Map();
+            
+            if (data.commits && data.commits.length > 0) {
+                data.commits.forEach(commit => {
+                    if (commit.files) {
+                        commit.files.forEach(file => {
+                            if (!filesChanged.has(file.path)) {
+                                filesChanged.set(file.path, {
+                                    path: file.path,
+                                    status: file.status,
+                                    additions: 0,
+                                    deletions: 0
+                                });
+                            }
+                            const f = filesChanged.get(file.path);
+                            f.additions += file.additions || 0;
+                            f.deletions += file.deletions || 0;
+                        });
+                    }
+                });
+                
+                const files = Array.from(filesChanged.values());
+                const addedFiles = files.filter(f => f.status === 'added' || f.status === 'A');
+                const modifiedFiles = files.filter(f => f.status === 'modified' || f.status === 'M');
+                
+                check.details.push(`📊 ${data.commits.length} commits with ${files.length} files changed`);
+                
+                if (addedFiles.length > 0) {
+                    check.details.push(`✨ ${addedFiles.length} new files created:`);
+                    addedFiles.forEach(f => check.details.push(`  + ${f.path}`));
+                }
+                
+                if (modifiedFiles.length > 0) {
+                    check.details.push(`📝 ${modifiedFiles.length} existing files modified:`);
+                    modifiedFiles.forEach(f => check.details.push(`  ~ ${f.path}`));
+                }
+                
+                // Store diff details separately for optional display
+                const diffDetails = files.map(f => ({
+                    path: f.path,
+                    additions: f.additions || 0,
+                    deletions: f.deletions || 0
+                }));
+                check.diffData = diffDetails;
+                
+                // Calculate total changes
+                const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0);
+                const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0);
+                check.details.push(`📈 Summary: +${totalAdditions} lines added, -${totalDeletions} lines removed`);
+                
+                check.status = 'passed';
+                report.passed++;
+            } else {
+                check.details.push(`ℹ️ No commits found during session`);
+                if (closureType === 'COMPLETE') {
+                    check.status = 'warning';
+                    check.details.push(`⚠️ Complete closure with no commits`);
+                    report.warnings++;
+                } else {
+                    check.status = 'info';
+                }
+            }
+        }
+    } catch (error) {
+        check.status = 'skipped';
+        check.details.push(`⏭️ File tracking skipped: ${error.message}`);
+    }
+    
+    report.checks.push(check);
+}
+
 async function verifyIdeasUpdated(session, report) {
     const check = {
         name: 'Ideas & Issues Status',
@@ -216,6 +361,23 @@ async function verifyIdeasUpdated(session, report) {
                 check.details.push(`✅ Items can remain in current state for WIP`);
                 if (inProgress > 0) {
                     check.details.push(`📌 ${inProgress} items to continue next session`);
+                    
+                    // Check for handover notes in in-progress items
+                    const itemsWithHandover = inProgressItems.filter(item => 
+                        item.comments && item.comments.some(c => 
+                            c.text && (c.text.includes('Handover:') || c.text.includes('Session') || c.text.includes('Still working on'))
+                        )
+                    );
+                    
+                    if (itemsWithHandover.length > 0) {
+                        check.details.push(`✅ ${itemsWithHandover.length} items have handover notes`);
+                    } else if (inProgress > 0) {
+                        check.details.push(`⚠️ No handover notes found - should be added to in-progress items`);
+                        if (check.status !== 'failed') {
+                            check.status = 'warning';
+                            report.warnings++;
+                        }
+                    }
                 }
                 break;
                 
@@ -274,8 +436,8 @@ async function verifyWorktreeState(session, report, closureType) {
         
         if (!worktree) {
             // Different expectations based on closure type
-            if (closureType === 'ABANDON') {
-                check.details.push(`✅ Worktree removed after abandon (as expected)`);
+            if (closureType === 'ABANDON' || closureType === 'COMPLETE') {
+                check.details.push(`✅ Worktree removed after ${closureType.toLowerCase()} (as expected)`);
                 check.status = 'passed';
                 report.passed++;
             } else {
@@ -289,8 +451,10 @@ async function verifyWorktreeState(session, report, closureType) {
             // Check worktree state based on closure type
             switch(closureType) {
                 case 'COMPLETE':
-                    check.details.push(`✅ Worktree ready for PR/merge`);
-                    check.details.push(`📌 Next: Create PR with 'gh pr create'`);
+                    check.details.push(`⚠️ Worktree still exists after complete`);
+                    check.details.push(`📌 Expected: Worktree should be removed after merge`);
+                    check.status = 'warning';
+                    report.warnings++;
                     break;
                     
                 case 'WIP':
@@ -301,10 +465,10 @@ async function verifyWorktreeState(session, report, closureType) {
                     break;
                     
                 case 'ABANDON':
-                    check.details.push(`⚠️ Worktree still exists after abandon`);
-                    check.details.push(`📌 Run: git worktree remove ${worktree.name}`);
-                    check.status = 'warning';
-                    report.warnings++;
+                    check.details.push(`❌ Worktree still exists after abandon`);
+                    check.details.push(`📌 Should have been removed by close script`);
+                    check.status = 'failed';
+                    report.failed++;
                     break;
                     
                 default:
@@ -493,6 +657,312 @@ async function verifyBranchPushed(session, report, closureType) {
     report.checks.push(check);
 }
 
+async function verifyBranchCleanup(session, report, closureType) {
+    const check = {
+        name: 'Branch Cleanup',
+        status: 'checking',
+        details: []
+    };
+    
+    try {
+        // Check if branch still exists locally and remotely
+        const branchName = session.worktreeName || session.worktree;
+        
+        // Check local branches
+        const localResponse = await fetch(`/api/git-branches?type=local`);
+        const localBranches = localResponse.ok ? await localResponse.json() : { branches: [] };
+        const hasLocalBranch = localBranches.branches?.includes(branchName);
+        
+        // Check remote branches
+        const remoteResponse = await fetch(`/api/git-branches?type=remote`);
+        const remoteBranches = remoteResponse.ok ? await remoteResponse.json() : { branches: [] };
+        const hasRemoteBranch = remoteBranches.branches?.some(b => b.includes(branchName));
+        
+        switch(closureType) {
+            case 'COMPLETE':
+                // First check if branch was merged to main
+                const mergeCheckResponse = await fetch(`/api/git-merge-check?branch=${branchName}`);
+                const mergeCheck = mergeCheckResponse.ok ? await mergeCheckResponse.json() : { merged: false };
+                
+                if (!mergeCheck.merged) {
+                    check.details.push(`❌ Branch not merged to main - complete closure requires merge`);
+                    check.status = 'failed';
+                    report.failed++;
+                }
+                
+                // Complete should have deleted the branch after merge
+                if (hasLocalBranch) {
+                    check.details.push(`❌ Local branch still exists - should be deleted after merge`);
+                    if (check.status !== 'failed') {
+                        check.status = 'failed';
+                        report.failed++;
+                    }
+                } else {
+                    check.details.push(`✅ Local branch removed after merge`);
+                }
+                
+                if (hasRemoteBranch) {
+                    check.details.push(`⚠️ Remote branch still exists - consider deleting after PR merge`);
+                    if (check.status !== 'failed') {
+                        check.status = 'warning';
+                        report.warnings++;
+                    }
+                }
+                break;
+                
+            case 'WIP':
+                // WIP should keep the branch
+                if (hasLocalBranch) {
+                    check.details.push(`✅ Local branch preserved for continuation`);
+                } else {
+                    check.details.push(`⚠️ Local branch missing - may need to recreate from remote`);
+                    check.status = 'warning';
+                    report.warnings++;
+                }
+                
+                if (hasRemoteBranch) {
+                    check.details.push(`✅ Remote branch exists for backup`);
+                } else {
+                    check.details.push(`📌 Consider pushing to remote for backup`);
+                }
+                break;
+                
+            case 'ABANDON':
+                // Abandon should delete both local and remote branches
+                if (hasLocalBranch) {
+                    check.details.push(`❌ Local branch still exists - should be deleted`);
+                    check.status = 'failed';
+                    report.failed++;
+                } else {
+                    check.details.push(`✅ Local branch deleted`);
+                }
+                
+                if (hasRemoteBranch) {
+                    check.details.push(`❌ Remote branch still exists - should be deleted`);
+                    if (check.status !== 'failed') {
+                        check.status = 'failed';
+                        report.failed++;
+                    }
+                } else {
+                    check.details.push(`✅ Remote branch deleted`);
+                }
+                break;
+                
+            default:
+                check.details.push(`ℹ️ Branch status recorded`);
+                check.status = 'info';
+        }
+        
+        if (check.status === 'checking') {
+            check.status = 'passed';
+            report.passed++;
+        }
+        
+    } catch (error) {
+        check.status = 'skipped';
+        check.details.push(`⏭️ Branch check skipped: ${error.message}`);
+    }
+    
+    report.checks.push(check);
+}
+
+async function verifyLintResults(session, report, closureType) {
+    const check = {
+        name: 'Code Quality (Lint)',
+        status: 'checking',
+        details: []
+    };
+    
+    try {
+        // Try to get lint results if available
+        const response = await fetch(`/api/lint-results?worktree=${session.worktreeName || session.worktree}`);
+        const data = response.ok ? await response.json() : { available: false };
+        
+        if (data.available && data.results) {
+            const errors = data.results.errors || 0;
+            const warnings = data.results.warnings || 0;
+            
+            if (errors > 0) {
+                check.details.push(`❌ ${errors} lint errors found`);
+                if (closureType === 'COMPLETE') {
+                    check.status = 'failed';
+                    check.details.push(`⚠️ Complete closure should have no lint errors`);
+                    report.failed++;
+                } else {
+                    check.status = 'warning';
+                    report.warnings++;
+                }
+            } else {
+                check.details.push(`✅ No lint errors`);
+            }
+            
+            if (warnings > 0) {
+                check.details.push(`⚠️ ${warnings} lint warnings`);
+                if (check.status === 'checking') {
+                    check.status = 'warning';
+                    report.warnings++;
+                }
+            } else {
+                check.details.push(`✅ No lint warnings`);
+            }
+            
+            if (check.status === 'checking') {
+                check.status = 'passed';
+                report.passed++;
+            }
+        } else {
+            // Lint not run or not available
+            check.details.push(`ℹ️ Lint check not performed`);
+            if (closureType === 'COMPLETE') {
+                check.details.push(`📌 Consider running: npm run lint`);
+                check.status = 'warning';
+                report.warnings++;
+            } else {
+                check.status = 'info';
+            }
+        }
+    } catch (error) {
+        check.status = 'skipped';
+        check.details.push(`⏭️ Lint check skipped: ${error.message}`);
+    }
+    
+    report.checks.push(check);
+}
+
+async function verifyNewIssues(session, report) {
+    const check = {
+        name: 'New Issues Tracked',
+        status: 'checking',
+        details: []
+    };
+    
+    try {
+        // Get ideas/issues for this sprint
+        const response = await fetch(`/api/projects/${session.projectId}/ideas`);
+        const currentIdeas = response.ok ? await response.json() : { items: [] };
+        
+        // Filter for items created during this session
+        const sessionStart = new Date(session.startedAt || session.created);
+        const newItems = currentIdeas.items?.filter(item => {
+            if (!item.created) return false;
+            const itemCreated = new Date(item.created);
+            return itemCreated > sessionStart && item.sprint === (session.sprintName || session.sprint);
+        }) || [];
+        
+        if (newItems.length > 0) {
+            check.details.push(`✨ ${newItems.length} new issues/ideas added during session:`);
+            newItems.forEach(item => {
+                const status = item.status === 'done' ? '✅' : 
+                             item.status === 'in_progress' ? '⚡' : '📝';
+                check.details.push(`  ${status} [${item.id}] ${item.title}`);
+            });
+            check.status = 'passed';
+            report.passed++;
+        } else {
+            check.details.push(`ℹ️ No new issues added during session`);
+            check.status = 'info';
+        }
+        
+        // Also check for items that were moved TO this sprint during session
+        const movedItems = currentIdeas.items?.filter(item => {
+            if (!item.updated || item.created === item.updated) return false;
+            const itemUpdated = new Date(item.updated);
+            return itemUpdated > sessionStart && 
+                   item.sprint === (session.sprintName || session.sprint) &&
+                   (!item.created || new Date(item.created) < sessionStart);
+        }) || [];
+        
+        if (movedItems.length > 0) {
+            check.details.push(`📥 ${movedItems.length} existing items moved to this sprint:`);
+            movedItems.slice(0, 3).forEach(item => {
+                check.details.push(`  ↪ [${item.id}] ${item.title}`);
+            });
+            if (movedItems.length > 3) {
+                check.details.push(`  ... and ${movedItems.length - 3} more`);
+            }
+        }
+    } catch (error) {
+        check.status = 'skipped';
+        check.details.push(`⏭️ Issue tracking skipped: ${error.message}`);
+    }
+    
+    report.checks.push(check);
+}
+
+async function generateSessionSummary(session, report) {
+    const check = {
+        name: 'Session Overview',
+        status: 'info',
+        details: []
+    };
+    
+    try {
+        // Calculate session duration
+        const sessionStart = session.startedAt || session.created;
+        const sessionEnd = session.closedAt || new Date().toISOString();
+        
+        if (sessionStart) {
+            const start = new Date(sessionStart);
+            const end = new Date(sessionEnd);
+            const minutes = Math.round((end - start) / 60000);
+            const hours = Math.floor(minutes / 60);
+            const mins = minutes % 60;
+            check.details.push(`⏱️ Duration: ${hours}h ${mins}m`);
+        }
+        
+        // Worktree and branch info
+        check.details.push(`🌳 Worktree: ${session.worktreeName || session.worktree}`);
+        check.details.push(`🔀 Branch: ${session.branchName || session.worktreeName || session.worktree}`);
+        
+        // Port configuration
+        if (session.worktree?.frontendPort && session.worktree?.backendPort) {
+            check.details.push(`🔌 Ports: Frontend ${session.worktree.frontendPort}, Backend ${session.worktree.backendPort}`);
+        }
+        
+        // Sprint info
+        check.details.push(`🎯 Sprint: ${session.sprintName || session.sprint}`);
+        
+        // Closure type
+        if (session.closureType) {
+            const closureEmoji = {
+                'WIP': '🔄',
+                'COMPLETE': '✅',
+                'ABANDON': '❌',
+                'ARCHIVE': '📦'
+            };
+            check.details.push(`${closureEmoji[session.closureType] || '📝'} Closure: ${session.closureType}`);
+        }
+        
+        // Summary stats from other checks
+        const gitCheck = report.checks.find(c => c.name === 'Git Repository');
+        if (gitCheck) {
+            const commits = gitCheck.details?.find(d => d.includes('commits made'));
+            if (commits) check.details.push(`📊 ${commits}`);
+        }
+        
+        const fileCheck = report.checks.find(c => c.name === 'File Changes');
+        if (fileCheck) {
+            const summary = fileCheck.details?.find(d => d.includes('Summary:'));
+            if (summary) check.details.push(`📝 ${summary}`);
+        }
+        
+        const itemsCheck = report.checks.find(c => c.name === 'Ideas & Issues Status');
+        if (itemsCheck) {
+            const sprintStatus = itemsCheck.details?.find(d => d.includes('Sprint status:'));
+            if (sprintStatus) check.details.push(`✅ ${sprintStatus}`);
+        }
+        
+    } catch (error) {
+        check.details.push(`⚠️ Could not generate full summary: ${error.message}`);
+    }
+    
+    // Always mark as info since this is just a summary
+    check.status = 'info';
+    
+    // Insert at beginning of checks array for visibility
+    report.checks.unshift(check);
+}
+
 function showVerificationProgress(sessionId) {
     // Remove any existing progress indicator
     const existingProgress = document.getElementById(`verification-progress-${sessionId}`);
@@ -586,9 +1056,26 @@ function showVerificationReport(report) {
                             <div class="font-medium text-sm">${check.name}</div>
                             ${check.message ? `<div class="text-xs text-red-600 mt-1">${check.message}</div>` : ''}
                             ${check.details && check.details.length > 0 ? `
-                                <div class="text-xs text-gray-700 mt-1 space-y-1">
-                                    ${check.details.map(d => `<div>${d}</div>`).join('')}
+                                <div class="text-xs text-gray-700 mt-1 space-y-1 ${check.name === 'File Changes' && check.details.length > 15 ? 'max-h-48 overflow-y-auto border-l-2 border-gray-200 pl-2' : ''}">
+                                    ${check.details.map(d => {
+                                        // Style file paths differently
+                                        const isFilePath = d.startsWith('  +') || d.startsWith('  ~') || d.startsWith('  -');
+                                        const isHeader = d.includes('new files') || d.includes('files modified') || d.includes('files deleted') || d.includes('commits with');
+                                        return `<div class="${isFilePath ? 'font-mono text-xs ml-3' : isHeader ? 'font-medium mt-1' : ''}">${d}</div>`;
+                                    }).join('')}
                                 </div>
+                            ` : ''}
+                            ${check.diffData && check.diffData.length > 0 ? `
+                                <details class="mt-2">
+                                    <summary class="text-xs text-blue-600 cursor-pointer hover:text-blue-800">
+                                        View line-by-line changes
+                                    </summary>
+                                    <div class="mt-1 text-xs font-mono bg-gray-50 p-2 rounded max-h-32 overflow-y-auto">
+                                        ${check.diffData.map(f => 
+                                            `<div>${f.path}: <span class="text-green-600">+${f.additions}</span> <span class="text-red-600">-${f.deletions}</span></div>`
+                                        ).join('')}
+                                    </div>
+                                </details>
                             ` : ''}
                         </div>
                     </div>
@@ -677,7 +1164,7 @@ function showVerificationReport(report) {
 }
 
 function copyVerificationReport(sessionId) {
-    const session = sessions.find(s => s.sessionId === sessionId);
+    const session = window.sessions?.find(s => s.sessionId === sessionId);
     if (!session || !session.verificationReport) return;
     
     const report = session.verificationReport;

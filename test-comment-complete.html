@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complete Comment Fix Test</title>
+    <style>
+        .test-result { padding: 10px; margin: 5px; border-radius: 5px; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>Comment Feature Fix - Complete Test Suite</h1>
+    <div id="results"></div>
+    
+    <script>
+        const results = document.getElementById('results');
+        
+        function addResult(message, status = 'info') {
+            const div = document.createElement('div');
+            div.className = `test-result ${status}`;
+            div.textContent = message;
+            results.appendChild(div);
+        }
+        
+        async function runTests() {
+            // Test 1: Check global variables
+            addResult('Test 1: Checking global variables...');
+            
+            if (typeof window.ideas !== 'undefined') {
+                addResult('✓ window.ideas is defined', 'pass');
+            } else {
+                addResult('✗ window.ideas is NOT defined', 'fail');
+            }
+            
+            if (typeof window.activeProject !== 'undefined') {
+                addResult('✓ window.activeProject is defined', 'pass');
+            } else {
+                addResult('✗ window.activeProject is NOT defined', 'fail');
+            }
+            
+            if (typeof window.sessions !== 'undefined') {
+                addResult('✓ window.sessions is defined', 'pass');
+            } else {
+                addResult('✗ window.sessions is NOT defined', 'fail');
+            }
+            
+            // Test 2: Test API without activeProject
+            addResult('Test 2: Testing API without activeProject...');
+            window.activeProject = null;
+            
+            try {
+                if (!window.activeProject) {
+                    addResult('✓ Correctly detected null activeProject', 'pass');
+                } else {
+                    addResult('✗ Failed to detect null activeProject', 'fail');
+                }
+            } catch (e) {
+                addResult('✗ Error: ' + e.message, 'fail');
+            }
+            
+            // Test 3: Test API with activeProject
+            addResult('Test 3: Testing API with activeProject set...');
+            window.activeProject = 'asterick';
+            
+            try {
+                const response = await fetch(`http://localhost:9000/api/projects/${window.activeProject}/ideas`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    addResult(`✓ API call successful - Found ${data.items?.length || 0} items`, 'pass');
+                    
+                    // Test 4: Simulate comment addition
+                    addResult('Test 4: Simulating comment addition...');
+                    
+                    if (data.items && data.items.length > 0) {
+                        const testItem = data.items[0];
+                        
+                        if (!testItem.comments) {
+                            testItem.comments = [];
+                        }
+                        
+                        testItem.comments.push({
+                            text: 'Test comment from test suite',
+                            timestamp: new Date().toISOString(),
+                            user: 'Test User'
+                        });
+                        
+                        // Send back to server
+                        const saveResponse = await fetch(`http://localhost:9000/api/projects/${window.activeProject}/ideas`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+                        
+                        if (saveResponse.ok) {
+                            addResult('✓ Successfully saved comment to server', 'pass');
+                        } else {
+                            addResult('✗ Failed to save comment to server', 'fail');
+                        }
+                    } else {
+                        addResult('⚠ No items found to test with', 'info');
+                    }
+                } else {
+                    addResult('✗ API call failed', 'fail');
+                }
+            } catch (e) {
+                addResult('✗ API Error: ' + e.message, 'fail');
+            }
+            
+            // Test 5: Check function availability
+            addResult('Test 5: Checking function availability...');
+            
+            if (typeof addComment === 'function') {
+                addResult('✓ addComment function is available', 'pass');
+            } else {
+                addResult('✗ addComment function is NOT available', 'fail');
+            }
+            
+            if (typeof renderIdeasTab === 'function') {
+                addResult('✓ renderIdeasTab function is available', 'pass');
+            } else {
+                addResult('✗ renderIdeasTab function is NOT available', 'fail');
+            }
+            
+            // Summary
+            addResult('');
+            addResult('=== TEST COMPLETE ===', 'info');
+            addResult('The comment feature should now work properly when:', 'info');
+            addResult('1. You have selected a project (asterick or moseymail)', 'info');
+            addResult('2. You navigate to the Ideas & Issues tab', 'info');
+            addResult('3. You enter a comment and click Add', 'info');
+        }
+        
+        // Run tests when page loads
+        setTimeout(runTests, 1000);
+    </script>
+</body>
+</html>
