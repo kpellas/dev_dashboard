@@ -267,10 +267,16 @@ function renderEnhancedSessionCardWithTabs(session) {
                                 </div>
                                 
                                 ${state === 'planned' ? `
-                                    <button onclick="event.stopPropagation(); markSessionStarted('${session.sessionId}')" 
-                                        class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm font-medium">
-                                        Mark Session Started
-                                    </button>
+                                    <div class="flex gap-2">
+                                        <button onclick="event.stopPropagation(); copyStartPrompt('${session.sessionId}')" 
+                                            class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm font-medium">
+                                            📋 Copy Start Script
+                                        </button>
+                                        <button onclick="event.stopPropagation(); markSessionStarted('${session.sessionId}')" 
+                                            class="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm font-medium">
+                                            ✅ Mark as Started
+                                        </button>
+                                    </div>
                                 ` : ''}
                             </div>
                         ` : activeTab === 'complete' ? `

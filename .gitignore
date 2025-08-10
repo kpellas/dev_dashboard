@@ -4,4 +4,5 @@ node_modules/
 sessions/
 .ideas.json
 .worktrees.json
-projects.jsonworktrees/
+projects.json
+worktrees/
