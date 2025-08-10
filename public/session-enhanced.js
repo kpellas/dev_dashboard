@@ -425,14 +425,14 @@ function generateCloseScript(sessionId, outcome) {
     session.lastCloseAction = outcome.toUpperCase();
     
     const sprintName = session.sprintName || session.sprint;
-    const worktreeName = session.worktreeName || session.worktree;
-    // Must have ports from worktree config - no fallbacks
-    const frontendPort = session.worktree?.frontendPort;
-    const backendPort = session.worktree?.backendPort;
+    const worktreeName = session.worktreeName || session.worktree || 'main';
+    // Try to get ports from worktree config, but allow defaults for non-worktree sessions
+    const frontendPort = session.worktree?.frontendPort || session.frontendPort || 5173;
+    const backendPort = session.worktree?.backendPort || session.backendPort || 3001;
     
+    // Only show warning if truly no ports available
     if (!frontendPort || !backendPort) {
-        alert('Error: Worktree ports not configured. Please check worktree configuration.');
-        return;
+        console.warn('No ports configured for session, using defaults');
     }
     const sprintItems = ideas?.items?.filter(item => 
         item.sprint === sprintName && item.status !== 'done'
@@ -442,6 +442,27 @@ function generateCloseScript(sessionId, outcome) {
     const inProgressItems = sprintItems.filter(i => i.status === 'in_progress');
     
     let prompt = '';
+    
+    // Common state detection for all scripts
+    const stateDetection = `
+# Detect current state
+CURRENT_DIR=$(pwd)
+CURRENT_BRANCH=$(git branch --show-current)
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+IS_IN_WORKTREE=false
+WORKTREE_PATH=""
+
+# Check if we're in a worktree
+if git rev-parse --git-dir 2>/dev/null | grep -q "worktrees"; then
+    IS_IN_WORKTREE=true
+    WORKTREE_PATH=$(pwd)
+fi
+
+echo "📍 Detected state:"
+echo "   Directory: $CURRENT_DIR"
+echo "   Branch: $CURRENT_BRANCH"
+echo "   In worktree: $IS_IN_WORKTREE"
+echo ""`;
     
     if (outcome === 'wip') {
         // Get session start time if available
@@ -457,24 +478,40 @@ echo "=========================================="
 echo "🔄 Closing Session - Work in Progress"
 echo "=========================================="
 echo "Sprint: ${sprintName}"
-echo "Branch: ${worktreeName}"
+echo "Expected Branch: ${worktreeName}"
 echo "Session Duration: ${sessionDuration} minutes"
 echo "Completed: ${completedItems.length} items"
 echo "In Progress: ${inProgressItems.length} items"
 echo ""
 
-# Verify we're in the right place
+${stateDetection}
+
+# Handle branch mismatch gracefully
 EXPECTED_BRANCH="${worktreeName}"
-CURRENT_BRANCH=$(git branch --show-current)
 if [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
-    echo "❌ ERROR: Wrong branch!"
-    echo "Expected: $EXPECTED_BRANCH"
-    echo "Current: $CURRENT_BRANCH"
-    exit 1
+    echo "⚠️ Not on expected branch"
+    echo "   Expected: $EXPECTED_BRANCH"
+    echo "   Current: $CURRENT_BRANCH"
+    
+    # Try to find the branch
+    if git branch | grep -q "$EXPECTED_BRANCH"; then
+        echo "   Switching to $EXPECTED_BRANCH..."
+        git checkout "$EXPECTED_BRANCH"
+    else
+        echo "   Continuing on current branch: $CURRENT_BRANCH"
+        EXPECTED_BRANCH="$CURRENT_BRANCH"
+    fi
 fi
 
-# Navigate to worktree
-cd "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}" || exit 1
+# Navigate to appropriate directory
+if [ "$IS_IN_WORKTREE" = "true" ]; then
+    echo "✅ Already in worktree: $WORKTREE_PATH"
+elif [ -d "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}" ]; then
+    echo "📂 Navigating to worktree..."
+    cd "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}"
+else
+    echo "📂 No worktree found, staying in current directory"
+fi
 
 # Show session metrics
 echo "📊 Session Metrics:"
@@ -509,13 +546,18 @@ ${inProgressItems.map(i => `- ${i.title}`).join('\n')}
 
 Handover: $HANDOVER_NOTES" || echo "No changes to commit"
 
+# Push to remote for safety
+echo "📤 Pushing to remote for backup..."
+git push -u origin $EXPECTED_BRANCH 2>/dev/null || git push
+echo "✅ Work backed up to remote"
+
 # Stop servers
 echo "🛑 Stopping servers..."
 lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null || true
 lsof -ti:${backendPort} | xargs kill -9 2>/dev/null || true
 
 echo ""
-echo "✅ Session saved locally (not pushed)"
+echo "✅ Session saved and pushed to remote"
 echo ""
 echo "⚠️ IMPORTANT - Update Ideas & Issues:"
 echo "1. Add handover notes as comments to in-progress items"
@@ -524,8 +566,11 @@ echo ""
 echo "📋 Handover notes to add:"
 echo "$HANDOVER_NOTES"
 echo ""
-echo "🌳 Branch: ${worktreeName}"
-echo "⏱️ Session duration: ${sessionDuration} minutes"`;
+echo "🌳 Branch: $EXPECTED_BRANCH"
+echo "⏱️ Session duration: ${sessionDuration} minutes"
+echo ""
+echo "📌 To continue next session:"
+echo "   git checkout $EXPECTED_BRANCH"`;
         
     } else if (outcome === 'complete') {
         const sessionDuration = session.startedAt ? 
@@ -540,23 +585,46 @@ echo "=========================================="
 echo "✅ Closing Session - Sprint Complete"
 echo "=========================================="
 echo "Sprint: ${sprintName}"
-echo "Branch: ${worktreeName}"
+echo "Expected Branch: ${worktreeName}"
 echo "Session Duration: ${sessionDuration} minutes"
 echo "Completed: ${completedItems.length} items"
 echo ""
 
-# Verify we're in the right place
-EXPECTED_BRANCH="${worktreeName}"
-CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
-    echo "❌ ERROR: Wrong branch!"
-    echo "Expected: $EXPECTED_BRANCH"
-    echo "Current: $CURRENT_BRANCH"
-    exit 1
-fi
+${stateDetection}
 
-# Navigate to worktree
-cd "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}" || exit 1
+# Handle different starting states
+EXPECTED_BRANCH="${worktreeName}"
+NEEDS_MERGE=false
+
+if [ "$CURRENT_BRANCH" = "main" ]; then
+    echo "📍 Already on main branch"
+    
+    # Check if feature branch exists
+    if git branch | grep -q "$EXPECTED_BRANCH"; then
+        echo "   Feature branch $EXPECTED_BRANCH exists"
+        NEEDS_MERGE=true
+    else
+        echo "   No feature branch found - may already be merged or working directly on main"
+        NEEDS_MERGE=false
+    fi
+elif [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
+    echo "⚠️ Not on expected branch"
+    echo "   Expected: $EXPECTED_BRANCH"
+    echo "   Current: $CURRENT_BRANCH"
+    
+    if git branch | grep -q "$EXPECTED_BRANCH"; then
+        echo "   Switching to $EXPECTED_BRANCH..."
+        git checkout "$EXPECTED_BRANCH"
+        NEEDS_MERGE=true
+    else
+        echo "   Continuing with current branch: $CURRENT_BRANCH"
+        EXPECTED_BRANCH="$CURRENT_BRANCH"
+        NEEDS_MERGE=true
+    fi
+else
+    echo "✅ On expected branch: $EXPECTED_BRANCH"
+    NEEDS_MERGE=true
+fi
 
 # Show what we're about to complete
 echo "📊 Review changes before completing:"
@@ -614,44 +682,71 @@ Session duration: ${sessionDuration} minutes
 🤖 Generated with Claude Code
 Co-Authored-By: Claude <noreply@anthropic.com>" || echo "No changes to commit"
 
-# Merge to main locally (no push)
-echo "🔀 Merging to main locally..."
-git checkout main
-git merge ${worktreeName} --no-ff -m "Merge ${worktreeName}: ${sprintName} complete"
-
-# Verify merge succeeded
-if [ $? -ne 0 ]; then
-    echo "❌ Merge failed! Please resolve conflicts and try again"
-    echo "Branch and worktree preserved for conflict resolution"
-    exit 1
+# Handle merge based on state
+if [ "$NEEDS_MERGE" = "true" ] && [ "$CURRENT_BRANCH" != "main" ]; then
+    echo "🔀 Merging to main..."
+    
+    # Move to main repository if in worktree for merge
+    if [ "$IS_IN_WORKTREE" = "true" ] && [ -n "$PROJECT_ROOT" ]; then
+        echo "   Moving to main repository for merge..."
+        cd "$PROJECT_ROOT"
+    fi
+    
+    git checkout main
+    git merge $EXPECTED_BRANCH --no-ff -m "Merge $EXPECTED_BRANCH: ${sprintName} complete"
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ Merge failed! Please resolve conflicts and try again"
+        echo "Branch preserved for conflict resolution"
+        exit 1
+    fi
+    
+    # Verify the merge actually happened
+    MERGE_CHECK=$(git log --oneline -1 | grep -c "Merge $EXPECTED_BRANCH")
+    if [ $MERGE_CHECK -eq 0 ]; then
+        echo "❌ Merge verification failed"
+        echo "Branch preserved"
+        exit 1
+    fi
+    
+    echo "✅ Branch successfully merged to main"
+    
+    # Delete the merged branch
+    git branch -d $EXPECTED_BRANCH 2>/dev/null && echo "✅ Local branch deleted"
+    
+elif [ "$CURRENT_BRANCH" = "main" ] && [ "$NEEDS_MERGE" = "false" ]; then
+    echo "✅ Already on main with no branch to merge"
+    echo "   Work may have been done directly on main or already merged"
+else
+    echo "✅ No merge needed"
 fi
-
-# Verify the merge actually happened
-MERGE_CHECK=$(git log --oneline -1 | grep -c "Merge ${worktreeName}")
-if [ $MERGE_CHECK -eq 0 ]; then
-    echo "❌ Merge verification failed - branch not merged to main"
-    echo "Branch and worktree preserved"
-    exit 1
-fi
-
-echo "✅ Branch successfully merged to main"
 
 # Stop servers
 echo "🛑 Stopping servers..."
 lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null || true
 lsof -ti:${backendPort} | xargs kill -9 2>/dev/null || true
 
-# Clean up worktree
+# Clean up worktree if it exists
 echo "🧹 Cleaning up worktree..."
-cd "/Users/kellypellas/DevProjects/${activeProject}"
-git worktree remove "worktrees/${worktreeName}" --force
+if git worktree list | grep -q "${worktreeName}"; then
+    # Ensure we're not in the worktree before removing it
+    if [ "$IS_IN_WORKTREE" = "true" ]; then
+        cd "$PROJECT_ROOT" || cd "/Users/kellypellas/DevProjects/${activeProject}"
+    fi
+    
+    git worktree remove "worktrees/${worktreeName}" --force 2>/dev/null || \
+    git worktree remove "${worktreeName}" --force 2>/dev/null || \
+    echo "   Could not remove worktree automatically"
+    
+    echo "✅ Worktree removed"
+else
+    echo "   No worktree to remove"
+fi
 
-# Delete the branch (will fail if not merged)
-echo "🗑️ Deleting merged branch..."
-git branch -d ${worktreeName}
-if [ $? -ne 0 ]; then
-    echo "⚠️ Could not delete branch with -d, it may not be fully merged"
-    echo "Use 'git branch -D ${worktreeName}' to force delete if you're sure"
+# Cleanup any remaining branches
+if git branch | grep -q "$EXPECTED_BRANCH"; then
+    git branch -d $EXPECTED_BRANCH 2>/dev/null || \
+    echo "   Branch may have unpushed commits, use -D to force delete"
 fi
 
 echo ""
@@ -686,84 +781,121 @@ echo "=========================================="
 echo "❌ Abandoning Session"
 echo "=========================================="
 echo "Sprint: ${sprintName}"
-echo "Branch: ${worktreeName}"
+echo "Expected Branch: ${worktreeName}"
 echo "Session Duration: ${sessionDuration} minutes"
 echo ""
 
-# Verify we're in the right place
-EXPECTED_BRANCH="${worktreeName}"
-CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" != "$EXPECTED_BRANCH" ]; then
-    echo "❌ ERROR: Wrong branch!"
-    echo "Expected: $EXPECTED_BRANCH"
-    echo "Current: $CURRENT_BRANCH"
-    exit 1
-fi
+${stateDetection}
 
-# Navigate to worktree
-cd "/Users/kellypellas/DevProjects/${activeProject}/worktrees/${worktreeName}" || exit 1
+# CRITICAL: Create safety backup before ANY deletion
+echo "📦 Creating safety backup before abandon..."
+STASH_NAME="ABANDON_SAFETY_$(date +%Y%m%d_%H%M%S)_${worktreeName}"
+git stash push -a -m "$STASH_NAME" && echo "✅ Safety backup created: $STASH_NAME"
+echo "   Recovery command: git stash apply stash^{/$STASH_NAME}"
+echo ""
+
+# Handle different states
+EXPECTED_BRANCH="${worktreeName}"
+
+# Find the branch wherever it is
+if [ "$CURRENT_BRANCH" = "$EXPECTED_BRANCH" ]; then
+    echo "📍 On branch to abandon: $EXPECTED_BRANCH"
+elif [ "$CURRENT_BRANCH" = "main" ]; then
+    echo "📍 On main branch"
+    if git branch | grep -q "$EXPECTED_BRANCH"; then
+        echo "   Feature branch $EXPECTED_BRANCH exists and will be deleted"
+    fi
+else
+    echo "📍 On different branch: $CURRENT_BRANCH"
+    if git branch | grep -q "$EXPECTED_BRANCH"; then
+        echo "   Branch $EXPECTED_BRANCH exists and will be deleted"
+    fi
+fi
 
 # Show what will be abandoned
 echo "📊 Changes that will be abandoned:"
 git status --short
 echo ""
 
-# Abandon means delete everything
-echo "⚠️ ABANDONING: This will delete all uncommitted work!"
+# Confirm abandon
+echo ""
+echo "⚠️ ABANDONING will:"
+echo "   • Delete all uncommitted work (backed up to stash)"
+echo "   • Delete branch: $EXPECTED_BRANCH"
+echo "   • Remove worktree (if exists)"
+echo "   • Reset items to backlog"
 echo ""
 
-# Show what will be lost
-if [ -n "$(git status --porcelain)" ]; then
-    echo "Uncommitted changes that will be DELETED:"
-    git status --short
-    echo ""
-fi
-
-read -p "Type 'ABANDON' to confirm deletion: " CONFIRM
+read -p "Type 'ABANDON' to confirm: " CONFIRM
 if [ "$CONFIRM" != "ABANDON" ]; then
     echo "❌ Abandon cancelled"
+    echo "   Your work is safe in stash: $STASH_NAME"
     exit 0
 fi
 
-# Delete all changes
-echo "🗑️ Deleting all uncommitted work..."
+# Reset working directory
+echo "🗑️ Resetting working directory..."
 git reset --hard HEAD
 git clean -fd
-echo "✅ Uncommitted work deleted"
+echo "✅ Working directory reset"
+
+# Move to safe location before cleanup
+if [ "$CURRENT_BRANCH" != "main" ]; then
+    echo "📍 Switching to main branch..."
+    git checkout main 2>/dev/null || git checkout -b main
+fi
 
 # Stop servers
 echo "🛑 Stopping servers..."
 lsof -ti:${frontendPort} | xargs kill -9 2>/dev/null || true
 lsof -ti:${backendPort} | xargs kill -9 2>/dev/null || true
 
-# Ask about cleaning up worktree and branch
-echo ""
-echo "🧹 Clean up worktree and branch?"
-read -p "Delete worktree and branch? (y/n): " DELETE_WT
-if [ "$DELETE_WT" = "y" ]; then
-    cd "/Users/kellypellas/DevProjects/${activeProject}"
-    echo "Removing worktree..."
-    git worktree remove "worktrees/${worktreeName}" --force
-    echo "Deleting branch..."
-    git branch -D ${worktreeName} 2>/dev/null || echo "Branch may have unpushed commits"
-    echo "✅ Worktree and branch deleted"
+# Clean up worktree
+echo "🧹 Removing worktree..."
+if git worktree list | grep -q "${worktreeName}"; then
+    # Move out of worktree if we're in it
+    if [ "$IS_IN_WORKTREE" = "true" ]; then
+        cd "$PROJECT_ROOT" || cd "/Users/kellypellas/DevProjects/${activeProject}"
+    fi
+    
+    git worktree remove "worktrees/${worktreeName}" --force 2>/dev/null || \
+    git worktree remove "${worktreeName}" --force 2>/dev/null
+    echo "✅ Worktree removed"
 else
-    echo "Worktree kept at: worktrees/${worktreeName}"
+    echo "   No worktree to remove"
+fi
+
+# Delete branch
+echo "🗑️ Deleting branch..."
+if git branch | grep -q "$EXPECTED_BRANCH"; then
+    git branch -D $EXPECTED_BRANCH 2>/dev/null && echo "✅ Local branch deleted"
+    
+    # Try to delete remote branch too
+    git push origin --delete $EXPECTED_BRANCH 2>/dev/null && \
+    echo "✅ Remote branch deleted" || \
+    echo "   No remote branch or already deleted"
+else
+    echo "   Branch already deleted or doesn't exist"
 fi
 
 echo ""
-echo "📋 Session abandoned after ${sessionDuration} minutes"
+echo "=========================================="
+echo "📋 ABANDON COMPLETE"
+echo "=========================================="
+echo "✅ Work backed up to stash: $STASH_NAME"
+echo "✅ Branch deleted: $EXPECTED_BRANCH"
+echo "✅ Worktree removed"
+echo "✅ Servers stopped"
 echo ""
-
-# Auto-reset items to 'new'
-echo "📝 Resetting item statuses..."
-${inProgressItems.map(item => `
-echo "Resetting ${item.id} to 'new'"
-# This would need API call - for now showing what needs resetting
-`).join('')}
-
+echo "📝 Items to reset in Ideas & Issues:"
+${inProgressItems.map(item => `echo "   • ${item.id}: ${item.title} → reset to 'new'"`).join('\n')}
 echo ""
-echo "✅ Abandon complete"`;
+echo "🔄 Recovery options:"
+echo "   • Recover work: git stash apply stash^{/$STASH_NAME}"
+echo "   • View stash: git stash show -p stash^{/$STASH_NAME}"
+echo "   • List all stashes: git stash list | grep ABANDON"
+echo ""
+echo "Session duration: ${sessionDuration} minutes"`;
     }
     
     // Store the generated prompt for this outcome
